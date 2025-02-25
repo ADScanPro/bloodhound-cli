@@ -10,15 +10,15 @@ CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
 class BloodHoundACEAnalyzer:
     def __init__(self, uri: str, user: str, password: str):
-        """Inicializa la conexión con Neo4j"""
+        """Initializes the connection with Neo4j."""
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
     def close(self):
-        """Cierra la conexión con Neo4j"""
+        """Closes the connection with Neo4j."""
         self.driver.close()
 
-    # Métodos de consultas para ACLs, ordenadores y usuarios (se mantienen los mismos que antes)
     def get_critical_aces(self, username: str) -> List[Dict]:
+        """Queries ACLs for a specific user."""
         with self.driver.session() as session:
             query = """
             MATCH p=(n)-[r1]->(m)
@@ -26,126 +26,126 @@ class BloodHoundACEAnalyzer:
               AND r1.isacl = true AND m.enabled = true
             WITH n, m, r1,
                  CASE 
-                     WHEN 'User' IN labels(n) THEN 'Usuario'
-                     WHEN 'Group' IN labels(n) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(n) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(n) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(n) THEN 'User'
+                     WHEN 'Group' IN labels(n) THEN 'Group'
+                     WHEN 'Computer' IN labels(n) THEN 'Computer'
+                     WHEN 'OU' IN labels(n) THEN 'OU'
                      WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Dominio'
-                     ELSE 'Otro'
-                 END as sourceType,
+                     WHEN 'Domain' IN labels(n) THEN 'Domain'
+                     ELSE 'Other'
+                 END AS sourceType,
                  CASE 
                      WHEN 'User' IN labels(n) THEN n.samaccountname
                      WHEN 'Group' IN labels(n) THEN n.samaccountname
                      WHEN 'Computer' IN labels(n) THEN n.samaccountname
                      WHEN 'OU' IN labels(n) THEN n.distinguishedname
                      ELSE n.name
-                 END as source,
+                 END AS source,
                  CASE 
-                     WHEN 'User' IN labels(m) THEN 'Usuario'
-                     WHEN 'Group' IN labels(m) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(m) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(m) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(m) THEN 'User'
+                     WHEN 'Group' IN labels(m) THEN 'Group'
+                     WHEN 'Computer' IN labels(m) THEN 'Computer'
+                     WHEN 'OU' IN labels(m) THEN 'OU'
                      WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Dominio'
-                     ELSE 'Otro'
-                 END as targetType,
+                     WHEN 'Domain' IN labels(m) THEN 'Domain'
+                     ELSE 'Other'
+                 END AS targetType,
                  CASE 
                      WHEN 'User' IN labels(m) THEN m.samaccountname
                      WHEN 'Group' IN labels(m) THEN m.samaccountname
                      WHEN 'Computer' IN labels(m) THEN m.samaccountname
                      WHEN 'OU' IN labels(m) THEN m.distinguishedname
                      ELSE m.name
-                 END as target,
+                 END AS target,
                  CASE
                      WHEN n.domain IS NOT NULL THEN toLower(n.domain)
                      ELSE 'N/A'
-                 END as sourceDomain,
+                 END AS sourceDomain,
                  CASE
                      WHEN m.domain IS NOT NULL THEN toLower(m.domain)
                      ELSE 'N/A'
-                 END as targetDomain
+                 END AS targetDomain
             RETURN DISTINCT {
                 source: source,
                 sourceType: sourceType,
                 target: target,
                 targetType: targetType,
                 type: type(r1),
-                dominioOrigen: sourceDomain,
-                dominioDestino: targetDomain
-            } as result
+                sourceDomain: sourceDomain,
+                targetDomain: targetDomain
+            } AS result
             UNION
             MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
             WHERE toLower(n.samaccountname) = toLower($samaccountname)
               AND r1.isacl = true AND m.enabled = true
             WITH n, m, r1,
                  CASE 
-                     WHEN 'User' IN labels(n) THEN 'Usuario'
-                     WHEN 'Group' IN labels(n) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(n) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(n) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(n) THEN 'User'
+                     WHEN 'Group' IN labels(n) THEN 'Group'
+                     WHEN 'Computer' IN labels(n) THEN 'Computer'
+                     WHEN 'OU' IN labels(n) THEN 'OU'
                      WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Dominio'
-                     ELSE 'Otro'
-                 END as sourceType,
+                     WHEN 'Domain' IN labels(n) THEN 'Domain'
+                     ELSE 'Other'
+                 END AS sourceType,
                  CASE 
                      WHEN 'User' IN labels(n) THEN n.samaccountname
                      WHEN 'Group' IN labels(n) THEN n.samaccountname
                      WHEN 'Computer' IN labels(n) THEN n.samaccountname
                      WHEN 'OU' IN labels(n) THEN n.distinguishedname
                      ELSE n.name
-                 END as source,
+                 END AS source,
                  CASE 
-                     WHEN 'User' IN labels(m) THEN 'Usuario'
-                     WHEN 'Group' IN labels(m) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(m) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(m) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(m) THEN 'User'
+                     WHEN 'Group' IN labels(m) THEN 'Group'
+                     WHEN 'Computer' IN labels(m) THEN 'Computer'
+                     WHEN 'OU' IN labels(m) THEN 'OU'
                      WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Dominio'
-                     ELSE 'Otro'
-                 END as targetType,
+                     WHEN 'Domain' IN labels(m) THEN 'Domain'
+                     ELSE 'Other'
+                 END AS targetType,
                  CASE 
                      WHEN 'User' IN labels(m) THEN m.samaccountname
                      WHEN 'Group' IN labels(m) THEN m.samaccountname
                      WHEN 'Computer' IN labels(m) THEN m.samaccountname
                      WHEN 'OU' IN labels(m) THEN m.distinguishedname
                      ELSE m.name
-                 END as target,
+                 END AS target,
                  CASE
                      WHEN n.domain IS NOT NULL THEN toLower(n.domain)
                      ELSE 'N/A'
-                 END as sourceDomain,
+                 END AS sourceDomain,
                  CASE
                      WHEN m.domain IS NOT NULL THEN toLower(m.domain)
                      ELSE 'N/A'
-                 END as targetDomain
+                 END AS targetDomain
             RETURN DISTINCT {
                 source: source,
                 sourceType: sourceType,
                 target: target,
                 targetType: targetType,
                 type: type(r1),
-                dominioOrigen: sourceDomain,
-                dominioDestino: targetDomain
-            } as result
+                sourceDomain: sourceDomain,
+                targetDomain: targetDomain
+            } AS result
             """
             results = session.run(query, samaccountname=username).data()
             return [r["result"] for r in results]
 
     def print_aces(self, username: str):
         aces = self.get_critical_aces(username)
-        print(f"\nACLs para usuario: {username}")
+        print(f"\nACLs for user: {username}")
         print("=" * 50)
         if not aces:
-            print("No se encontraron ACLs para este usuario")
+            print("No ACLs found for this user")
             return
         for ace in aces:
-            print(f"\nOrigen: {ace['source']}")
-            print(f"Tipo Origen: {ace['sourceType']}")
-            print(f"Dominio Origen: {ace['dominioOrigen']}")
-            print(f"Destino: {ace['target']}")
-            print(f"Tipo Destino: {ace['targetType']}")
-            print(f"Dominio Destino: {ace['dominioDestino']}")
+            print(f"\nSource: {ace['source']}")
+            print(f"Source Type: {ace['sourceType']}")
+            print(f"Source Domain: {ace['sourceDomain']}")
+            print(f"Target: {ace['target']}")
+            print(f"Target Type: {ace['targetType']}")
+            print(f"Target Domain: {ace['targetDomain']}")
             print(f"ACL: {ace['type']}")
             print("-" * 50)
 
@@ -159,13 +159,13 @@ class BloodHoundACEAnalyzer:
               AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
             WITH n, m, r1,
                  CASE 
-                     WHEN 'User' IN labels(n) THEN 'Usuario'
-                     WHEN 'Group' IN labels(n) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(n) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(n) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(n) THEN 'User'
+                     WHEN 'Group' IN labels(n) THEN 'Group'
+                     WHEN 'Computer' IN labels(n) THEN 'Computer'
+                     WHEN 'OU' IN labels(n) THEN 'OU'
                      WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Dominio'
-                     ELSE 'Otro'
+                     WHEN 'Domain' IN labels(n) THEN 'Domain'
+                     ELSE 'Other'
                  END AS sourceType,
                  CASE 
                      WHEN 'User' IN labels(n) THEN n.samaccountname
@@ -175,13 +175,13 @@ class BloodHoundACEAnalyzer:
                      ELSE n.name
                  END AS source,
                  CASE 
-                     WHEN 'User' IN labels(m) THEN 'Usuario'
-                     WHEN 'Group' IN labels(m) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(m) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(m) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(m) THEN 'User'
+                     WHEN 'Group' IN labels(m) THEN 'Group'
+                     WHEN 'Computer' IN labels(m) THEN 'Computer'
+                     WHEN 'OU' IN labels(m) THEN 'OU'
                      WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Dominio'
-                     ELSE 'Otro'
+                     WHEN 'Domain' IN labels(m) THEN 'Domain'
+                     ELSE 'Other'
                  END AS targetType,
                  CASE 
                      WHEN 'User' IN labels(m) THEN m.samaccountname
@@ -204,8 +204,8 @@ class BloodHoundACEAnalyzer:
                 target: target,
                 targetType: targetType,
                 type: type(r1),
-                dominioOrigen: sourceDomain,
-                dominioDestino: targetDomain
+                sourceDomain: sourceDomain,
+                targetDomain: targetDomain
             } AS result
             UNION
             MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
@@ -215,13 +215,13 @@ class BloodHoundACEAnalyzer:
               AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
             WITH n, m, r1,
                  CASE 
-                     WHEN 'User' IN labels(n) THEN 'Usuario'
-                     WHEN 'Group' IN labels(n) THEN 'Grupo'
-                     WHEN 'Computer' IN labels(n) THEN 'Ordenador'
-                     WHEN 'OU' IN labels(n) THEN 'Unidad Organizativa'
+                     WHEN 'User' IN labels(n) THEN 'User'
+                     WHEN 'Group' IN labels(n) THEN 'Group'
+                     WHEN 'Computer' IN labels(n) THEN 'Computer'
+                     WHEN 'OU' IN labels(n) THEN 'OU'
                      WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Dominio'
-                     ELSE 'Otro'
+                     WHEN 'Domain' IN labels(n) THEN 'Domain'
+                     ELSE 'Other'
                  END AS sourceType,
                  CASE 
                      WHEN 'User' IN labels(n) THEN n.samaccountname
@@ -258,27 +258,27 @@ class BloodHoundACEAnalyzer:
                 target: target,
                 targetType: targetType,
                 type: type(r1),
-                dominioOrigen: sourceDomain,
-                dominioDestino: targetDomain
+                sourceDomain: sourceDomain,
+                targetDomain: targetDomain
             } AS result
             """
             results = session.run(query, domain=domain.upper(), blacklist=[d.upper() for d in blacklist]).data()
             return [r["result"] for r in results]
 
-    def print_aces_by_domain(self, domain: str, blacklist: List[str]):
+    def print_critical_aces_by_domain(self, domain: str, blacklist: List[str]):
         aces = self.get_critical_aces_by_domain(domain, blacklist)
-        print(f"\nACLs para dominio: {domain}")
+        print(f"\nACLs for domain: {domain}")
         print("=" * 50)
         if not aces:
-            print("No se encontraron ACLs para este dominio")
+            print("No ACLs found for this domain")
             return
         for ace in aces:
-            print(f"\nOrigen: {ace['source']}")
-            print(f"Tipo Origen: {ace['sourceType']}")
-            print(f"Dominio Origen: {ace['dominioOrigen']}")
-            print(f"Destino: {ace['target']}")
-            print(f"Tipo Destino: {ace['targetType']}")
-            print(f"Dominio Destino: {ace['dominioDestino']}")
+            print(f"\nSource: {ace['source']}")
+            print(f"Source Type: {ace['sourceType']}")
+            print(f"Source Domain: {ace['sourceDomain']}")
+            print(f"Target: {ace['target']}")
+            print(f"Target Type: {ace['targetType']}")
+            print(f"Target Domain: {ace['targetDomain']}")
             print(f"ACL: {ace['type']}")
             print("-" * 50)
 
@@ -309,14 +309,14 @@ class BloodHoundACEAnalyzer:
                 with open(output, "w") as f:
                     for comp in computers:
                         f.write(f"{comp}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nOrdenadores en el dominio: {domain}")
+            print(f"\nComputers in domain: {domain}")
             print("=" * 50)
             if not computers:
-                print("No se encontraron ordenadores para este dominio")
+                print("No computers found for this domain")
             else:
                 for comp in computers:
                     print(comp)
@@ -338,14 +338,14 @@ class BloodHoundACEAnalyzer:
                 with open(output, "w") as f:
                     for user in users:
                         f.write(f"{user}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nUsuarios en el dominio: {domain}")
+            print(f"\nUsers in domain: {domain}")
             print("=" * 50)
             if not users:
-                print("No se encontraron usuarios para este dominio")
+                print("No users found for this domain")
             else:
                 for user in users:
                     print(user)
@@ -354,14 +354,14 @@ class BloodHoundACEAnalyzer:
         with self.driver.session() as session:
             query = """
             MATCH p=(u:User)-[:MemberOf*1..]->(g:Group)
-            WHERE g.admincount = true 
-              AND u.admincount = false 
-              AND u.enabled = true 
+            WHERE g.admincount = true
+              AND u.admincount = false
+              AND u.enabled = true
               AND toLower(u.domain) = toLower($domain)
             RETURN u.samaccountname AS samaccountname
             UNION
             MATCH (u:User {admincount:true})
-            WHERE u.enabled = true 
+            WHERE u.enabled = true
               AND toLower(u.domain) = toLower($domain)
             RETURN u.samaccountname AS samaccountname
             """
@@ -375,14 +375,14 @@ class BloodHoundACEAnalyzer:
                 with open(output, "w") as f:
                     for user in admin_users:
                         f.write(f"{user}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nUsuarios con privilegios en el dominio: {domain}")
+            print(f"\nPrivileged (admin) users in domain: {domain}")
             print("=" * 50)
             if not admin_users:
-                print("No se encontraron usuarios con privilegios para este dominio")
+                print("No privileged users found for this domain")
             else:
                 for user in admin_users:
                     print(user)
@@ -408,14 +408,14 @@ class BloodHoundACEAnalyzer:
                 with open(output, "w") as f:
                     for user in highvalue_users:
                         f.write(f"{user}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nUsuarios de alto valor en el dominio: {domain}")
+            print(f"\nHigh-value users in domain: {domain}")
             print("=" * 50)
             if not highvalue_users:
-                print("No se encontraron usuarios de alto valor para este dominio")
+                print("No high-value users found for this domain")
             else:
                 for user in highvalue_users:
                     print(user)
@@ -424,8 +424,8 @@ class BloodHoundACEAnalyzer:
         with self.driver.session() as session:
             query = """
             MATCH (u:User)
-            WHERE u.enabled = true 
-              AND u.passwordnotreqd = true 
+            WHERE u.enabled = true
+              AND u.passwordnotreqd = true
               AND toLower(u.domain) = toLower($domain)
             RETURN u.samaccountname AS samaccountname
             """
@@ -439,25 +439,25 @@ class BloodHoundACEAnalyzer:
                 with open(output, "w") as f:
                     for user in users:
                         f.write(f"{user}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nUsuarios con password not required en el dominio: {domain}")
+            print(f"\nUsers with password not required in domain: {domain}")
             print("=" * 50)
             if not users:
-                print("No se encontraron usuarios con 'passwordnotreqd' habilitado para este dominio")
+                print("No users with 'passwordnotreqd' found for this domain")
             else:
                 for user in users:
                     print(user)
 
     def get_password_never_expires_users(self, domain: str) -> List[str]:
-        """Consulta los usuarios que tienen habilitado el atributo pwdneverexpires en el dominio especificado."""
+        """Queries users that have 'pwdneverexpires' enabled in the specified domain."""
         with self.driver.session() as session:
             query = """
             MATCH (u:User)
-            WHERE u.enabled = true 
-              AND u.pwdneverexpires = true 
+            WHERE u.enabled = true
+              AND u.pwdneverexpires = true
               AND toLower(u.domain) = toLower($domain)
             RETURN u.samaccountname AS samaccountname
             """
@@ -465,26 +465,27 @@ class BloodHoundACEAnalyzer:
             return [record["samaccountname"] for record in results]
 
     def print_password_never_expires_users(self, domain: str, output: str = None):
-        """Imprime o guarda en archivo la lista de usuarios con pwdneverexpires habilitado en un dominio."""
+        """Prints or saves to a file the list of users with 'pwdneverexpires' enabled in a domain."""
         users = self.get_password_never_expires_users(domain)
         if output:
             try:
                 with open(output, "w") as f:
                     for user in users:
                         f.write(f"{user}\n")
-                print(f"Resultados guardados en: {output}")
+                print(f"Results saved to: {output}")
             except Exception as e:
-                print(f"Error al escribir el archivo: {e}")
+                print(f"Error writing the file: {e}")
         else:
-            print(f"\nUsuarios con 'pwdneverexpires' habilitado en el dominio: {domain}")
+            print(f"\nUsers with 'pwdneverexpires' enabled in domain: {domain}")
             print("=" * 50)
             if not users:
-                print("No se encontraron usuarios con 'pwdneverexpires' habilitado para este dominio")
+                print("No users with 'pwdneverexpires' found for this domain")
             else:
                 for user in users:
                     print(user)
 
 def save_config(host: str, port: str, db_user: str, db_password: str):
+    """Saves the Neo4j connection configuration to a file in the user's directory."""
     config = configparser.ConfigParser()
     config["NEO4J"] = {
         "host": host,
@@ -495,9 +496,10 @@ def save_config(host: str, port: str, db_user: str, db_password: str):
     with open(CONFIG_PATH, "w") as configfile:
         config.write(configfile)
     os.chmod(CONFIG_PATH, stat.S_IRUSR | stat.S_IWUSR)
-    print(f"Configuración guardada en {CONFIG_PATH}")
+    print(f"Configuration saved at {CONFIG_PATH}")
 
 def load_config():
+    """Loads the configuration from the file, if it exists."""
     config = configparser.ConfigParser()
     if os.path.exists(CONFIG_PATH):
         config.read(CONFIG_PATH)
@@ -507,39 +509,39 @@ def load_config():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Script para consultar datos en BloodHound (Neo4j)"
+        description="Script to query data in BloodHound (Neo4j)"
     )
-    subparsers = parser.add_subparsers(dest="subcommand", required=True, help="Subcomandos disponibles")
+    subparsers = parser.add_subparsers(dest="subcommand", required=True, help="Available subcommands")
 
-    # Subcomando set
-    parser_set = subparsers.add_parser("set", help="Guarda la configuración de conexión a Neo4j")
-    parser_set.add_argument("--host", required=True, help="Host de Neo4j")
-    parser_set.add_argument("--port", required=True, help="Puerto de Neo4j")
-    parser_set.add_argument("--db-user", required=True, help="Usuario de Neo4j")
-    parser_set.add_argument("--db-password", required=True, help="Password de Neo4j")
+    # set subcommand
+    parser_set = subparsers.add_parser("set", help="Saves the connection configuration for Neo4j")
+    parser_set.add_argument("--host", required=True, help="Neo4j host")
+    parser_set.add_argument("--port", required=True, help="Neo4j port")
+    parser_set.add_argument("--db-user", required=True, help="Neo4j user")
+    parser_set.add_argument("--db-password", required=True, help="Neo4j password")
 
-    # Subcomando ACLs
-    parser_acl = subparsers.add_parser("acl", help="Consulta ACLs en BloodHound")
+    # acl subcommand
+    parser_acl = subparsers.add_parser("acl", help="Query ACLs in BloodHound")
     group_acl = parser_acl.add_mutually_exclusive_group(required=True)
-    group_acl.add_argument("-u", "--user", help="Nombre de usuario (samaccountname)")
-    group_acl.add_argument("-d", "--domain", help="Dominio para enumerar ACLs")
-    parser_acl.add_argument("-bd", "--blacklist-domains", nargs="*", default=[], help="Dominios a excluir (separados por espacios)")
+    group_acl.add_argument("-u", "--user", help="Username (samaccountname)")
+    group_acl.add_argument("-d", "--domain", help="Domain to enumerate ACLs")
+    parser_acl.add_argument("-bd", "--blacklist-domains", nargs="*", default=[], help="Exclude these domains (space-separated)")
 
-    # Subcomando ordenadores
-    parser_computer = subparsers.add_parser("computer", help="Consulta ordenadores en BloodHound")
-    parser_computer.add_argument("-d", "--domain", required=True, help="Dominio para enumerar ordenadores")
-    parser_computer.add_argument("-o", "--output", help="Ruta del archivo para guardar resultados")
-    parser_computer.add_argument("--laps", type=str, choices=["True", "False"], help="Filtro por haslaps: True o False")
+    # computer subcommand
+    parser_computer = subparsers.add_parser("computer", help="Query computers in BloodHound")
+    parser_computer.add_argument("-d", "--domain", required=True, help="Domain to enumerate computers")
+    parser_computer.add_argument("-o", "--output", help="Path to file to save results")
+    parser_computer.add_argument("--laps", type=str, choices=["True", "False"], help="Filter by haslaps: True or False")
 
-    # Subcomando usuarios
-    parser_user = subparsers.add_parser("user", help="Consulta usuarios en BloodHound")
-    parser_user.add_argument("-d", "--domain", required=True, help="Dominio para enumerar usuarios")
-    parser_user.add_argument("-o", "--output", help="Ruta del archivo para guardar resultados")
+    # user subcommand
+    parser_user = subparsers.add_parser("user", help="Query users in BloodHound")
+    parser_user.add_argument("-d", "--domain", required=True, help="Domain to enumerate users")
+    parser_user.add_argument("-o", "--output", help="Path to file to save results")
     group_value = parser_user.add_mutually_exclusive_group()
-    group_value.add_argument("--admin-count", action="store_true", help="Selecciona solo usuarios con privilegios del dominio")
-    group_value.add_argument("--high-value", action="store_true", help="Selecciona solo usuarios de alto valor")
-    group_value.add_argument("--password-not-required", action="store_true", help="Selecciona solo usuarios con 'passwordnotreqd' habilitado")
-    group_value.add_argument("--password-never-expires", action="store_true", help="Selecciona solo usuarios con 'pwdneverexpires' habilitado")
+    group_value.add_argument("--admin-count", action="store_true", help="Show only users with domain admin privileges (admincount)")
+    group_value.add_argument("--high-value", action="store_true", help="Show only high-value users")
+    group_value.add_argument("--password-not-required", action="store_true", help="Show only users with 'passwordnotreqd' enabled")
+    group_value.add_argument("--password-never-expires", action="store_true", help="Show only users with 'pwdneverexpires' enabled")
 
     args = parser.parse_args()
 
@@ -548,18 +550,18 @@ def main():
         return
 
     if args.subcommand != "set" and not os.path.exists(CONFIG_PATH):
-        print("Error: No se encontró el archivo de configuración.")
-        print("Por favor, ejecute el subcomando 'set' para establecer las variables de conexión, por ejemplo:")
+        print("Error: Configuration file not found.")
+        print("Please run the 'set' subcommand to set the connection variables, for example:")
         print("  python bloodhound_query.py set --host localhost --port 7687 --db-user neo4j --db-password Bl00dh0und")
         exit(1)
 
     conf = load_config()
     if conf is None:
-        print("Error: No se encontró la configuración de conexión. Ejecute 'python bloodhound_query.py set ...'")
+        print("Error: No connection configuration found. Please run 'python bloodhound_query.py set ...'")
         exit(1)
     for key in ["host", "port", "db_user", "db_password"]:
         if key not in conf:
-            print(f"Error: La clave '{key}' no se encontró en la configuración. Ejecute 'python bloodhound_query.py set ...'")
+            print(f"Error: The key '{key}' was not found in the configuration. Please run 'python bloodhound_query.py set ...'")
             exit(1)
 
     host = conf["host"]
