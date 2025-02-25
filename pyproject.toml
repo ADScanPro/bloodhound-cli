@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bloodhound-query"  # El nombre del paquete, con el que se instalará (pip install bloodhound-query)
-version = "0.1.0"          # Versionado semántico recomendado
-description = "CLI para consultar datos de BloodHound (Neo4j) sin la GUI."
+name = "bloodhound-cli"  # The package name as installed via pip (pip install bloodhound-cli)
+version = "0.1.0"          # Recommended semantic versioning
+description = "CLI for querying BloodHound (Neo4j) data without using the GUI."
 authors = [
-  { name="Yeray Martín", email="yeraymd44@gmail.com" }
+  { name="ADScan", email="github@adscanpro.com" }
 ]
 license = "MIT"
 requires-python = ">=3.7"
@@ -22,7 +22,6 @@ dependencies = [
   "neo4j>=5.0.0"
 ]
 
-# Aquí definimos el script/entry point que se ejecutará cuando un usuario
-# ejecute "bloodhound-query" en la terminal (así no tienen que hacer python -m).
+# Define the entry point that will be executed when a user runs "bloodhound-cli" in the terminal.
 [project.scripts]
-bloodhound-query = "bloodhound_query.main:main"
+bloodhound-cli = "bloodhound-cli.main:main"

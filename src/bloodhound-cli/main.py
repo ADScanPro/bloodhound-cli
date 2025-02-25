@@ -552,16 +552,16 @@ def main():
     if args.subcommand != "set" and not os.path.exists(CONFIG_PATH):
         print("Error: Configuration file not found.")
         print("Please run the 'set' subcommand to set the connection variables, for example:")
-        print("  python bloodhound_query.py set --host localhost --port 7687 --db-user neo4j --db-password Bl00dh0und")
+        print("  bloodhound-cli.py set --host localhost --port 7687 --db-user neo4j --db-password Bl00dh0und")
         exit(1)
 
     conf = load_config()
     if conf is None:
-        print("Error: No connection configuration found. Please run 'python bloodhound_query.py set ...'")
+        print("Error: No connection configuration found. Please run 'bloodhound-cli.py set ...'")
         exit(1)
     for key in ["host", "port", "db_user", "db_password"]:
         if key not in conf:
-            print(f"Error: The key '{key}' was not found in the configuration. Please run 'python bloodhound_query.py set ...'")
+            print(f"Error: The key '{key}' was not found in the configuration. Please run 'bloodhound-cli.py set ...'")
             exit(1)
 
     host = conf["host"]
