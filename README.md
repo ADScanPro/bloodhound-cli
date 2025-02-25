@@ -11,7 +11,7 @@
 2. **ACL Queries (`acl` subcommand)**
     
     - Enumerate ACLs related to a single user by specifying `-u/--user`.
-    - Enumerate ACLs for a domain by specifying `-d/--domain`.
+    - Enumerate cross-domain ACLs for a domain by specifying `-d/--domain`.
     - Optionally exclude multiple domains with `-bd/--blacklist-domains`.
 3. **Computer Queries (`computer` subcommand)**
     
@@ -64,7 +64,7 @@ pip install bloodhound-cli
         bloodhound-cli acl --user myuser
         ```
         
-    - **For a domain:**
+    - **For cross-domain:**
         
         ```sh
         bloodhound-cli acl --domain mydomain.local
