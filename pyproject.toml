@@ -7,9 +7,9 @@ name = "bloodhound-cli"  # The package name as installed via pip (pip install bl
 version = "0.1.0"          # Recommended semantic versioning
 description = "CLI for querying BloodHound (Neo4j) data without using the GUI."
 authors = [
-  { name="ADScan", email="github@adscanpro.com" }
+  { name = "ADScan", email = "github@adscanpro.com" }
 ]
-license = "MIT"
+license = { text = "MIT" }
 requires-python = ">=3.7"
 keywords = ["bloodhound", "neo4j", "ad", "active directory", "pentesting"]
 classifiers = [
@@ -24,4 +24,4 @@ dependencies = [
 
 # Define the entry point that will be executed when a user runs "bloodhound-cli" in the terminal.
 [project.scripts]
-bloodhound-cli = "bloodhound-cli.main:main"
+bloodhound-cli = "bloodhound_cli.main:main"
