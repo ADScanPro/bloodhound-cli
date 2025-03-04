@@ -483,6 +483,31 @@ class BloodHoundACEAnalyzer:
             else:
                 for user in users:
                     print(user)
+                    
+    def execute_custom_query(self, query: str, output: str = None):
+        """Executes a custom Cypher query provided by the user."""
+        with self.driver.session() as session:
+            try:
+                results = session.run(query).data()
+                if output:
+                    try:
+                        with open(output, "w") as f:
+                            for result in results:
+                                f.write(f"{result}\n")
+                        print(f"Results saved to: {output}")
+                    except Exception as e:
+                        print(f"Error writing the file: {e}")
+                else:
+                    print("\nCustom query results:")
+                    print("=" * 50)
+                    if not results:
+                        print("No results found for this query")
+                    else:
+                        for result in results:
+                            print(result)
+                            print("-" * 50)
+            except Exception as e:
+                print(f"Error executing query: {str(e)}")
 
 def save_config(host: str, port: str, db_user: str, db_password: str):
     """Saves the Neo4j connection configuration to a file in the user's directory."""
@@ -542,6 +567,11 @@ def main():
     group_value.add_argument("--high-value", action="store_true", help="Show only high-value users")
     group_value.add_argument("--password-not-required", action="store_true", help="Show only users with 'passwordnotreqd' enabled")
     group_value.add_argument("--password-never-expires", action="store_true", help="Show only users with 'pwdneverexpires' enabled")
+    
+    # custom subcommand
+    parser_custom = subparsers.add_parser("custom", help="Execute a custom Cypher query in BloodHound")
+    parser_custom.add_argument("--query", required=True, help="Custom Cypher query to execute")
+    parser_custom.add_argument("-o", "--output", help="Path to file to save results")
 
     args = parser.parse_args()
 
@@ -593,6 +623,8 @@ def main():
                 analyzer.print_password_never_expires_users(args.domain, args.output)
             else:
                 analyzer.print_users(args.domain, args.output)
+        elif args.subcommand == "custom":
+            analyzer.execute_custom_query(args.query, args.output)
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
