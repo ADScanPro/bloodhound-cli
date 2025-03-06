@@ -1,0 +1,40 @@
+name: Bump Version
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install bump2version
+        run: |
+          pip install bump2version
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Bump version
+        run: |
+          # Importante que en tu .bumpversion.cfg tengas configurado "tag = True"
+          # y "tag_name = v{new_version}" si quieres que el tag sea "v0.1.7"
+          bump2version patch
+
+      - name: Push changes
+        run: |
+          # Empuja el commit y el tag generado
+          git push origin HEAD --follow-tags
