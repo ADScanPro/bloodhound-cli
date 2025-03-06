@@ -26,6 +26,10 @@ jobs:
         run: |
           pip install bump2version build
 
+      - name: Configurar Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
       - name: Incrementar versión (bump patch)
         run: |
           bump2version patch
