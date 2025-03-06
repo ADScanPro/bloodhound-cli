@@ -6,7 +6,7 @@ from neo4j import GraphDatabase
 import argparse
 from typing import List, Dict
 
-CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
+CONFIG_PATH = os.path.expanduser("~/.bloodhound_config") 
 
 class BloodHoundACEAnalyzer:
     def __init__(self, uri: str, user: str, password: str):
