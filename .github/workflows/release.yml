@@ -1,0 +1,41 @@
+name: Publicar a PyPI
+
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - '*'  # Evita que los push de tags disparen este workflow
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependencias
+        run: |
+          pip install bump2version build
+
+      - name: Incrementar versión (bump patch)
+        run: |
+          bump2version patch
+
+      - name: Construir el paquete
+        run: |
+          python -m build
+
+      - name: Publicar en PyPI
+        uses: pypa/gh-action-pypi-publish@v1.4.2
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
