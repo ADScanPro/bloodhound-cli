@@ -1,49 +1,28 @@
-name: Publicar a PyPI
-
 on:
   push:
-    branches:
-      - main
-    tags-ignore:
-      - '*'  # Evita que los push de tags disparen este workflow
+    tags:
+      - 'v*'   # <--- Se activa cuando se hace push de un tag que empiece por 'v'
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: "! contains(github.event.head_commit.message, '[skip ci]')"  # <-- Condición
 
     steps:
-      - name: Checkout del repositorio
+      - name: Checkout
         uses: actions/checkout@v2
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: '3.9'
 
-      - name: Instalar dependencias
-        run: |
-          pip install bump2version build
+      - name: Install build
+        run: pip install build
 
-      - name: Configurar Git
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-      - name: Incrementar versión (bump patch)
-        run: |
-          bump2version patch
+      - name: Build
+        run: python -m build
 
-      - name: Push de cambios (commit y tags)
-        run: |
-          git push origin HEAD --follow-tags
-
-      - name: Construir el paquete
-        run: |
-          python -m build
-
-      - name: Publicar en PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.4.2
         with:
           user: __token__
