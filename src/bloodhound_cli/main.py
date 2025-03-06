@@ -17,13 +17,14 @@ class BloodHoundACEAnalyzer:
         """Closes the connection with Neo4j."""
         self.driver.close()
 
-    def get_critical_aces(self, username: str) -> List[Dict]:
+    def get_critical_aces(self, username: str, high_value: bool = False) -> List[Dict]:
         """Queries ACLs for a specific user."""
         with self.driver.session() as session:
             query = """
             MATCH p=(n)-[r1]->(m)
             WHERE toLower(n.samaccountname) = toLower($samaccountname)
-              AND r1.isacl = true AND (m.enabled = true OR m.enabled = NULL)
+              AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+              """ + ("""AND m.highvalue = true""" if high_value else "") + """
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
@@ -78,6 +79,7 @@ class BloodHoundACEAnalyzer:
             MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
             WHERE toLower(n.samaccountname) = toLower($samaccountname)
               AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+              """ + ("""AND m.highvalue = true""" if high_value else "") + """
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
@@ -132,9 +134,10 @@ class BloodHoundACEAnalyzer:
             results = session.run(query, samaccountname=username).data()
             return [r["result"] for r in results]
 
-    def print_aces(self, username: str):
-        aces = self.get_critical_aces(username)
-        print(f"\nACLs for user: {username}")
+    def print_aces(self, username: str, high_value: bool = False):
+        aces = self.get_critical_aces(username, high_value)
+        value_suffix = " (high-value targets only)" if high_value else ""
+        print(f"\nACLs for user: {username}{value_suffix}")
         print("=" * 50)
         if not aces:
             print("No ACLs found for this user")
@@ -149,7 +152,7 @@ class BloodHoundACEAnalyzer:
             print(f"ACL: {ace['type']}")
             print("-" * 50)
 
-    def get_critical_aces_by_domain(self, domain: str, blacklist: List[str]) -> List[Dict]:
+    def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False) -> List[Dict]:
         with self.driver.session() as session:
             query = """
             MATCH p=(n)-[r1]->(m)
@@ -157,6 +160,7 @@ class BloodHoundACEAnalyzer:
               AND toUpper(n.domain) = toUpper($domain)
               AND toUpper(n.domain) <> toUpper(m.domain)
               AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
+              """ + ("""AND m.highvalue = true""" if high_value else "") + """
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
@@ -213,6 +217,7 @@ class BloodHoundACEAnalyzer:
               AND toUpper(n.domain) = toUpper($domain)
               AND toUpper(n.domain) <> toUpper(m.domain)
               AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
+              """ + ("""AND m.highvalue = true""" if high_value else "") + """
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
@@ -265,9 +270,10 @@ class BloodHoundACEAnalyzer:
             results = session.run(query, domain=domain.upper(), blacklist=[d.upper() for d in blacklist]).data()
             return [r["result"] for r in results]
 
-    def print_critical_aces_by_domain(self, domain: str, blacklist: List[str]):
-        aces = self.get_critical_aces_by_domain(domain, blacklist)
-        print(f"\nACLs for domain: {domain}")
+    def print_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False):
+        aces = self.get_critical_aces_by_domain(domain, blacklist, high_value)
+        value_suffix = " (high-value targets only)" if high_value else ""
+        print(f"\nACLs for domain: {domain}{value_suffix}")
         print("=" * 50)
         if not aces:
             print("No ACLs found for this domain")
@@ -551,6 +557,7 @@ def main():
     group_acl.add_argument("-u", "--user", help="Username (samaccountname)")
     group_acl.add_argument("-d", "--domain", help="Domain to enumerate ACLs")
     parser_acl.add_argument("-bd", "--blacklist-domains", nargs="*", default=[], help="Exclude these domains (space-separated)")
+    parser_acl.add_argument("--high-value", action="store_true", help="Show only ACLs to high-value targets")
 
     # computer subcommand
     parser_computer = subparsers.add_parser("computer", help="Query computers in BloodHound")
@@ -604,9 +611,9 @@ def main():
     try:
         if args.subcommand == "acl":
             if args.user:
-                analyzer.print_aces(args.user)
+                analyzer.print_aces(args.user, args.high_value)
             elif args.domain:
-                analyzer.print_aces_by_domain(args.domain, args.blacklist_domains)
+                analyzer.print_critical_aces_by_domain(args.domain, args.blacklist_domains, args.high_value)
         elif args.subcommand == "computer":
             laps = None
             if args.laps is not None:
