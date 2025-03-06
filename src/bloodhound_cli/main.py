@@ -23,7 +23,7 @@ class BloodHoundACEAnalyzer:
             query = """
             MATCH p=(n)-[r1]->(m)
             WHERE toLower(n.samaccountname) = toLower($samaccountname)
-              AND r1.isacl = true AND m.enabled = true
+              AND r1.isacl = true AND (m.enabled = true OR m.enabled = NULL)
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
@@ -77,7 +77,7 @@ class BloodHoundACEAnalyzer:
             UNION
             MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
             WHERE toLower(n.samaccountname) = toLower($samaccountname)
-              AND r1.isacl = true AND m.enabled = true
+              AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
             WITH n, m, r1,
                  CASE 
                      WHEN 'User' IN labels(n) THEN 'User'
