@@ -515,6 +515,63 @@ class BloodHoundACEAnalyzer:
             except Exception as e:
                 print(f"Error executing query: {str(e)}")
 
+def import_json_files(self, file_paths: List[str]) -> None:
+        """
+        Importa archivos JSON generados por SharpHound v4.3.1 a la base de datos de BloodHound.
+        Se asume que cada archivo tiene la estructura: { "meta": { "type": "...", "count": ... }, "data": [ ... ] }
+        """
+        with self.driver.session() as session:
+            for file_path in file_paths:
+                print(f"\nProcesando archivo: {file_path}")
+                try:
+                    with open(file_path, 'r', encoding='utf-8-sig') as f:
+                        data_obj = json.load(f)
+                except Exception as e:
+                    print(f"Error al cargar {file_path}: {e}")
+                    continue
+
+                if "meta" in data_obj and "data" in data_obj:
+                    meta = data_obj["meta"]
+                    data_type = meta.get("type", "").lower()  # ej. "users", "computers", etc.
+                    records = data_obj["data"]
+                    # Convertir el plural a singular y capitalizar (ej. "users" -> "User")
+                    label = data_type[:-1].capitalize() if data_type.endswith("s") else data_type.capitalize()
+
+                    for record in records:
+                        objectid = record.get("ObjectIdentifier")
+                        if not objectid:
+                            print(f"Saltando registro sin 'ObjectIdentifier': {record}")
+                            continue
+                        # Usamos siempre la etiqueta Base para identificar el nodo y se añade la etiqueta específica
+                        cypher = "MERGE (n:Base {objectid: $id}) "
+                        if label:
+                            cypher += f"SET n:{label} "
+                        # Se asignan las propiedades; se utiliza 'Properties' si existe, sino se usa el registro completo
+                        props = record.get("Properties", record)
+                        cypher += "SET n += $props"
+                        session.run(cypher, id=objectid, props=props)
+
+                        # Procesar ACLs (Aces) si existen en el nodo
+                        aces = record.get("Aces")
+                        if aces:
+                            for ace in aces:
+                                principal = ace.get("PrincipalSID")
+                                if not principal or principal == objectid:
+                                    continue
+                                reltype = ace.get("RightName")
+                                isinherited = ace.get("IsInherited", False)
+                                rel_cypher = f"""
+                                MATCH (p:Base {{objectid: $principal}})
+                                MATCH (o:Base {{objectid: $objectid}})
+                                MERGE (p)-[r:{reltype}]->(o)
+                                SET r += {{isacl: true, isinherited: $isinherited}}
+                                """
+                                session.run(rel_cypher, principal=principal, objectid=objectid, isinherited=isinherited)
+                    print(f"Importados {len(records)} registros de '{data_type}' desde {file_path}")
+                else:
+                    # Si la estructura es diferente, se puede implementar un método de respaldo
+                    print(f"Estructura desconocida en {file_path}, saltando el archivo.")
+
 def save_config(host: str, port: str, db_user: str, db_password: str):
     """Saves the Neo4j connection configuration to a file in the user's directory."""
     config = configparser.ConfigParser()
@@ -579,6 +636,10 @@ def main():
     parser_custom = subparsers.add_parser("custom", help="Execute a custom Cypher query in BloodHound")
     parser_custom.add_argument("--query", required=True, help="Custom Cypher query to execute")
     parser_custom.add_argument("-o", "--output", help="Path to file to save results")
+    
+    # import subcommand
+    parser_import = subparsers.add_parser("import", help="Import JSON files into BloodHound")
+    parser_import.add_argument("-f", "--file", nargs="+", required=True, help="Path(s) to JSON file(s) to import")
 
     args = parser.parse_args()
 
@@ -632,6 +693,8 @@ def main():
                 analyzer.print_users(args.domain, args.output)
         elif args.subcommand == "custom":
             analyzer.execute_custom_query(args.query, args.output)
+        elif args.subcommand == "import":
+            analyzer.import_json_files(args.file)
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
