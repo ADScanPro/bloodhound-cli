@@ -515,6 +515,70 @@ class BloodHoundACEAnalyzer:
             except Exception as e:
                 print(f"Error executing query: {str(e)}")
 
+    def get_sessions(self, domain: str, da: bool = False) -> List[dict]:
+        """
+        Retrieves a list of computers with active sessions in the specified domain.
+        If 'da' is True, returns computers with sessions from domain admin users,
+        along with the domain admin username.
+        """
+        with self.driver.session() as session:
+            if da:
+                query = """
+                MATCH (dc:Computer)-[r1:MemberOf*0..]->(g1:Group)
+                WHERE g1.objectid =~ "S-1-5-.*-516" AND toLower(dc.domain) = toLower($domain)
+                WITH COLLECT(dc) AS exclude
+                MATCH (c:Computer)-[n:HasSession]->(u:User)-[r2:MemberOf*1..]->(g2:Group)
+                WHERE NOT c IN exclude AND g2.objectid ENDS WITH "-544" AND toLower(c.domain) = toLower($domain)
+                RETURN DISTINCT toLower(c.name) AS computer, toLower(u.samaccountname) AS domain_admin
+                """
+            else:
+                query = """
+                MATCH (c:Computer)-[n:HasSession]->(u:User)
+                WHERE toLower(c.domain) = toLower($domain)
+                RETURN DISTINCT toLower(c.name) AS computer
+                """
+            results = session.run(query, domain=domain).data()
+            return results
+
+    def print_sessions(self, domain: str, da: bool = False, output: str = None):
+        """
+        Prints the list of computers with active sessions in the specified domain.
+        If 'da' is True, prints the computer and the domain admin that is logged in on the console.
+        If an output file is specified, only the computer names are saved to the file.
+        """
+        sessions = self.get_sessions(domain, da)
+        if da:
+            console_output = f"\nDomain Admin Sessions in domain: {domain}\n" + "=" * 50 + "\n"
+        else:
+            console_output = f"\nSessions in domain: {domain}\n" + "=" * 50 + "\n"
+        
+        file_output = ""  # This will collect only the computer names for file export
+        
+        if not sessions:
+            console_output += "No sessions found.\n"
+            file_output += "No sessions found.\n"
+        else:
+            for session_record in sessions:
+                # Console output: if da flag is set, include domain admin info
+                if da:
+                    console_output += f"Computer: {session_record['computer']} | Domain Admin: {session_record['domain_admin']}\n"
+                else:
+                    console_output += f"{session_record['computer']}\n"
+                # File output: only save the computer name
+                file_output += f"{session_record['computer']}\n"
+        
+        # Print to console
+        print(console_output)
+        
+        # If output file is specified, write file_output to that file
+        if output:
+            try:
+                with open(output, "w") as f:
+                    f.write(file_output)
+                print(f"Results saved to: {output}")
+            except Exception as e:
+                print(f"Error writing the file: {e}")
+
 def import_json_files(self, file_paths: List[str]) -> None:
         """
         Importa archivos JSON generados por SharpHound v4.3.1 a la base de datos de BloodHound.
@@ -640,6 +704,12 @@ def main():
     # import subcommand
     parser_import = subparsers.add_parser("import", help="Import JSON files into BloodHound")
     parser_import.add_argument("-f", "--file", nargs="+", required=True, help="Path(s) to JSON file(s) to import")
+    
+    # session subcommand
+    parser_session = subparsers.add_parser("session", help="Query sessions in BloodHound")
+    parser_session.add_argument("-d", "--domain", required=True, help="Domain to enumerate sessions")
+    parser_session.add_argument("--da", action="store_true", help="Show only sessions for domain admins")
+    parser_session.add_argument("-o", "--output", help="Path to file to save results")
 
     args = parser.parse_args()
 
@@ -695,6 +765,8 @@ def main():
             analyzer.execute_custom_query(args.query, args.output)
         elif args.subcommand == "import":
             analyzer.import_json_files(args.file)
+        elif args.subcommand == "session":
+            analyzer.print_sessions(args.domain, da=args.da, output=args.output)
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
