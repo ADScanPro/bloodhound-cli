@@ -5,8 +5,10 @@ import configparser
 from neo4j import GraphDatabase
 import argparse
 from typing import List, Dict
+import json 
+from datetime import datetime, timezone
 
-CONFIG_PATH = os.path.expanduser("~/.bloodhound_config") 
+CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
 class BloodHoundACEAnalyzer:
     def __init__(self, uri: str, user: str, password: str):
@@ -356,6 +358,71 @@ class BloodHoundACEAnalyzer:
                 for user in users:
                     print(user)
 
+    def get_password_last_change(self, domain: str, user: str = None) -> List[dict]:
+        """
+        Retrieves the pwdlastset value and the whencreated value for enabled users in the specified domain.
+        If a user is specified, only returns the record for that user.
+        """
+        with self.driver.session() as session:
+            if user:
+                query = """
+                MATCH (u:User)
+                WHERE toLower(u.domain) = toLower($domain)
+                AND toLower(u.samaccountname) = toLower($user)
+                RETURN toLower(u.samaccountname) AS user, 
+                    u.pwdlastset AS password_last_change,
+                    u.whencreated AS when_created
+                """
+                results = session.run(query, domain=domain, user=user).data()
+            else:
+                query = """
+                MATCH (u:User)
+                WHERE u.enabled = true
+                AND toLower(u.domain) = toLower($domain)
+                RETURN toLower(u.samaccountname) AS user, 
+                    u.pwdlastset AS password_last_change,
+                    u.whencreated AS when_created
+                """
+                results = session.run(query, domain=domain).data()
+            return results
+
+    def print_password_last_change(self, domain: str, user: str = None, output: str = None):
+        """
+        Prints (or saves to file) the last password change value for enabled users in the specified domain.
+        If a user is specified, only that user's value is printed.
+        If pwdlastset is 0 then the whencreated value is used instead.
+        Converts the Unix timestamp to a human-readable date in UTC including the day of the week.
+        """
+        data = self.get_password_last_change(domain, user)
+        output_str = f"\nPassword Last Change for users in domain: {domain}\n" + "=" * 50 + "\n"
+        if not data:
+            output_str += "No users found with password last change data.\n"
+        else:
+            for record in data:
+                ts = record.get('password_last_change')
+                try:
+                    ts_float = float(ts)
+                    if ts_float == 0:
+                        # Use whencreated as fallback if pwdlastset is 0.
+                        wc = record.get('when_created')
+                        dt = datetime.fromtimestamp(float(wc), tz=timezone.utc)
+                        formatted_date = dt.strftime("%A, %Y-%m-%d %H:%M:%S UTC")
+                    else:
+                        dt = datetime.fromtimestamp(ts_float, tz=timezone.utc)
+                        formatted_date = dt.strftime("%A, %Y-%m-%d %H:%M:%S UTC")
+                except Exception as e:
+                    formatted_date = f"{ts} (error: {e})"
+                output_str += f"User: {record['user']} | Password Last Change: {formatted_date}\n"
+        if output:
+            try:
+                with open(output, "w") as f:
+                    f.write(output_str)
+                print(f"Results saved to: {output}")
+            except Exception as e:
+                print(f"Error writing file: {e}")
+        else:
+            print(output_str)
+
     def get_admin_users(self, domain: str) -> List[str]:
         with self.driver.session() as session:
             query = """
@@ -495,23 +562,21 @@ class BloodHoundACEAnalyzer:
         with self.driver.session() as session:
             try:
                 results = session.run(query).data()
+                output_str = "\nCustom query results:\n" + "=" * 50 + "\n"
+                if not results:
+                    output_str += "No results found for this query\n"
+                else:
+                    for result in results:
+                        output_str += f"{result}\n" + "-" * 50 + "\n"
                 if output:
                     try:
                         with open(output, "w") as f:
-                            for result in results:
-                                f.write(f"{result}\n")
+                            f.write(output_str)
                         print(f"Results saved to: {output}")
                     except Exception as e:
                         print(f"Error writing the file: {e}")
                 else:
-                    print("\nCustom query results:")
-                    print("=" * 50)
-                    if not results:
-                        print("No results found for this query")
-                    else:
-                        for result in results:
-                            print(result)
-                            print("-" * 50)
+                    print(output_str)
             except Exception as e:
                 print(f"Error executing query: {str(e)}")
 
@@ -580,61 +645,61 @@ class BloodHoundACEAnalyzer:
                 print(f"Error writing the file: {e}")
 
 def import_json_files(self, file_paths: List[str]) -> None:
-        """
-        Importa archivos JSON generados por SharpHound v4.3.1 a la base de datos de BloodHound.
-        Se asume que cada archivo tiene la estructura: { "meta": { "type": "...", "count": ... }, "data": [ ... ] }
-        """
-        with self.driver.session() as session:
-            for file_path in file_paths:
-                print(f"\nProcesando archivo: {file_path}")
-                try:
-                    with open(file_path, 'r', encoding='utf-8-sig') as f:
-                        data_obj = json.load(f)
-                except Exception as e:
-                    print(f"Error al cargar {file_path}: {e}")
-                    continue
+    """
+    Imports JSON files generated by SharpHound v4.3.1 into the BloodHound database.
+    Each file is assumed to have the structure: { "meta": { "type": "...", "count": ... }, "data": [ ... ] }
+    """
+    with self.driver.session() as session:
+        for file_path in file_paths:
+            print(f"\nProcesando archivo: {file_path}")
+            try:
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
+                    data_obj = json.load(f)
+            except Exception as e:
+                print(f"Error al cargar {file_path}: {e}")
+                continue
 
-                if "meta" in data_obj and "data" in data_obj:
-                    meta = data_obj["meta"]
-                    data_type = meta.get("type", "").lower()  # ej. "users", "computers", etc.
-                    records = data_obj["data"]
-                    # Convertir el plural a singular y capitalizar (ej. "users" -> "User")
-                    label = data_type[:-1].capitalize() if data_type.endswith("s") else data_type.capitalize()
+            if "meta" in data_obj and "data" in data_obj:
+                meta = data_obj["meta"]
+                data_type = meta.get("type", "").lower()  # e.g. "users", "computers", etc.
+                records = data_obj["data"]
+                # Convertir el plural a singular y capitalizar (e.g. "users" -> "User")
+                label = data_type[:-1].capitalize() if data_type.endswith("s") else data_type.capitalize()
 
-                    for record in records:
-                        objectid = record.get("ObjectIdentifier")
-                        if not objectid:
-                            print(f"Saltando registro sin 'ObjectIdentifier': {record}")
-                            continue
-                        # Usamos siempre la etiqueta Base para identificar el nodo y se añade la etiqueta específica
-                        cypher = "MERGE (n:Base {objectid: $id}) "
-                        if label:
-                            cypher += f"SET n:{label} "
-                        # Se asignan las propiedades; se utiliza 'Properties' si existe, sino se usa el registro completo
-                        props = record.get("Properties", record)
-                        cypher += "SET n += $props"
-                        session.run(cypher, id=objectid, props=props)
+                for record in records:
+                    objectid = record.get("ObjectIdentifier")
+                    if not objectid:
+                        print(f"Saltando registro sin 'ObjectIdentifier': {record}")
+                        continue
+                    # Usamos siempre la etiqueta Base para identificar el nodo y se añade la etiqueta específica
+                    cypher = "MERGE (n:Base {objectid: $id}) "
+                    if label:
+                        cypher += f"SET n:{label} "
+                    # Se asignan las propiedades; se utiliza 'Properties' si existe, sino se usa el registro completo
+                    props = record.get("Properties", record)
+                    cypher += "SET n += $props"
+                    session.run(cypher, id=objectid, props=props)
 
-                        # Procesar ACLs (Aces) si existen en el nodo
-                        aces = record.get("Aces")
-                        if aces:
-                            for ace in aces:
-                                principal = ace.get("PrincipalSID")
-                                if not principal or principal == objectid:
-                                    continue
-                                reltype = ace.get("RightName")
-                                isinherited = ace.get("IsInherited", False)
-                                rel_cypher = f"""
-                                MATCH (p:Base {{objectid: $principal}})
-                                MATCH (o:Base {{objectid: $objectid}})
-                                MERGE (p)-[r:{reltype}]->(o)
-                                SET r += {{isacl: true, isinherited: $isinherited}}
-                                """
-                                session.run(rel_cypher, principal=principal, objectid=objectid, isinherited=isinherited)
-                    print(f"Importados {len(records)} registros de '{data_type}' desde {file_path}")
-                else:
-                    # Si la estructura es diferente, se puede implementar un método de respaldo
-                    print(f"Estructura desconocida en {file_path}, saltando el archivo.")
+                    # Procesar ACLs (Aces) si existen en el nodo
+                    aces = record.get("Aces")
+                    if aces:
+                        for ace in aces:
+                            principal = ace.get("PrincipalSID")
+                            if not principal or principal == objectid:
+                                continue
+                            reltype = ace.get("RightName")
+                            isinherited = ace.get("IsInherited", False)
+                            rel_cypher = f"""
+                            MATCH (p:Base {{objectid: $principal}})
+                            MATCH (o:Base {{objectid: $objectid}})
+                            MERGE (p)-[r:{reltype}]->(o)
+                            SET r += {{isacl: true, isinherited: $isinherited}}
+                            """
+                            session.run(rel_cypher, principal=principal, objectid=objectid, isinherited=isinherited)
+                print(f"Importados {len(records)} registros de '{data_type}' desde {file_path}")
+            else:
+                # Si la estructura es diferente, se puede implementar un método de respaldo
+                print(f"Estructura desconocida en {file_path}, saltando el archivo.")
 
 def save_config(host: str, port: str, db_user: str, db_password: str):
     """Saves the Neo4j connection configuration to a file in the user's directory."""
@@ -689,22 +754,24 @@ def main():
     # user subcommand
     parser_user = subparsers.add_parser("user", help="Query users in BloodHound")
     parser_user.add_argument("-d", "--domain", required=True, help="Domain to enumerate users")
+    parser_user.add_argument("-u", "--user", help="User (samaccountname) to query (optional)")
     parser_user.add_argument("-o", "--output", help="Path to file to save results")
     group_value = parser_user.add_mutually_exclusive_group()
     group_value.add_argument("--admin-count", action="store_true", help="Show only users with domain admin privileges (admincount)")
     group_value.add_argument("--high-value", action="store_true", help="Show only high-value users")
     group_value.add_argument("--password-not-required", action="store_true", help="Show only users with 'passwordnotreqd' enabled")
     group_value.add_argument("--password-never-expires", action="store_true", help="Show only users with 'pwdneverexpires' enabled")
-    
+    group_value.add_argument("--password-last-change", action="store_true", help="Show the last password change value for user(s)")
+
     # custom subcommand
     parser_custom = subparsers.add_parser("custom", help="Execute a custom Cypher query in BloodHound")
     parser_custom.add_argument("--query", required=True, help="Custom Cypher query to execute")
     parser_custom.add_argument("-o", "--output", help="Path to file to save results")
-    
+
     # import subcommand
     parser_import = subparsers.add_parser("import", help="Import JSON files into BloodHound")
     parser_import.add_argument("-f", "--file", nargs="+", required=True, help="Path(s) to JSON file(s) to import")
-    
+
     # session subcommand
     parser_session = subparsers.add_parser("session", help="Query sessions in BloodHound")
     parser_session.add_argument("-d", "--domain", required=True, help="Domain to enumerate sessions")
@@ -751,7 +818,9 @@ def main():
                 laps = True if args.laps.lower() == "true" else False
             analyzer.print_computers(args.domain, args.output, laps)
         elif args.subcommand == "user":
-            if args.admin_count:
+            if args.password_last_change:
+                analyzer.print_password_last_change(args.domain, user=args.user, output=args.output)
+            elif args.admin_count:
                 analyzer.print_admin_users(args.domain, args.output)
             elif args.high_value:
                 analyzer.print_highvalue_users(args.domain, args.output)
