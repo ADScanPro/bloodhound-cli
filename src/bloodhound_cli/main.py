@@ -179,12 +179,21 @@ class BloodHoundACEAnalyzer:
         The relationship type in the query is set based on the provided 'connection' parameter.
         The query returns a dictionary (as result) with the same keys as get_critical_aces().
         """
+        # Determine if we use the generic relationship with type IN (...) or a specific one.
+        if connection.lower() == "all":
+            rel_condition = "AND type(r) IN ['AdminTo','CanRDP','CanPSRemote']"
+            rel_pattern = "[r]->"  # Generic relationship without type-template
+        else:
+            rel_condition = ""
+            rel_pattern = f"[r:{connection}]->"
+            
         if source.lower() != "all" and target.lower() == "all":
             query = f"""
-            MATCH p = (n)-[r:{connection}]->(m)
+            MATCH p = (n)-{rel_pattern}(m)
             WHERE toLower(n.samaccountname) = toLower($source)
             AND toLower(n.domain) = toLower($domain)
             AND m.enabled = true
+            {rel_condition}
             WITH n, m, r,
                 CASE 
                     WHEN 'User' IN labels(n) THEN 'User'
@@ -228,10 +237,11 @@ class BloodHoundACEAnalyzer:
                 END AS targetDomain
             RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-{rel_pattern}(m)
             WHERE toLower(n.samaccountname) = toLower($source)
             AND toLower(n.domain) = toLower($domain)
             AND m.enabled = true
+            {rel_condition}
             WITH n, m, r,
                 CASE 
                     WHEN 'User' IN labels(n) THEN 'User'
@@ -278,11 +288,12 @@ class BloodHoundACEAnalyzer:
             params = {"source": source, "domain": domain}
         elif source.lower() == "all" and target.lower() == "all":
             query = f"""
-            MATCH p = (n)-[r:{connection}]->(m)
+            MATCH p = (n)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
             AND (n.admincount IS NULL OR n.admincount = false)
             AND m.enabled = true
+            {rel_condition}
             WITH n, m, r,
                 CASE 
                     WHEN 'User' IN labels(n) THEN 'User'
@@ -326,11 +337,12 @@ class BloodHoundACEAnalyzer:
                 END AS targetDomain
             RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
             AND (n.admincount IS NULL OR n.admincount = false)
             AND m.enabled = true
+            {rel_condition}
             WITH n, m, r,
                 CASE 
                     WHEN 'User' IN labels(n) THEN 'User'
@@ -377,10 +389,11 @@ class BloodHoundACEAnalyzer:
             params = {"domain": domain}
         elif source.lower() == "all" and target.lower() == "dcs":
             query = f"""
-            MATCH p = (n)-[r:{connection}]->(m)
+            MATCH p = (n)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
             AND m.enabled = true
+            {rel_condition}
             AND (n.admincount IS NULL OR n.admincount = false)
             AND EXISTS {{
                 MATCH (m)-[:MemberOf]->(dc:Group)
@@ -429,10 +442,11 @@ class BloodHoundACEAnalyzer:
                 END AS targetDomain
             RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
             AND m.enabled = true
+            {rel_condition}
             AND (n.admincount IS NULL OR n.admincount = false)
             AND EXISTS {{
                 MATCH (m)-[:MemberOf]->(dc:Group)
@@ -1072,7 +1086,9 @@ def main():
     # access subcommand
     parser_access = subparsers.add_parser("access", help="Query access paths in BloodHound")
     parser_access.add_argument("-s", "--source", required=True, help="Source samaccountname or 'all'")
-    parser_access.add_argument("-c", "--connection", required=True, choices=["AdminTo", "CanRDP", "CanPSRemote"], help="Type of connection")
+    parser_access.add_argument("-c", "--connection", required=True,
+                           choices=["all", "AdminTo", "CanRDP", "CanPSRemote"],
+                           help="Type of connection (or 'all' for any)")
     parser_access.add_argument("-t", "--target", required=True, choices=["all", "dcs"], help="Target type")
     parser_access.add_argument("-d", "--domain", required=True, help="Domain for filtering nodes")
 
