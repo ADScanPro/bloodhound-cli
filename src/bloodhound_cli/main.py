@@ -151,7 +151,7 @@ class BloodHoundACEAnalyzer:
             print(f"Target: {ace['target']}")
             print(f"Target Type: {ace['targetType']}")
             print(f"Target Domain: {ace['targetDomain']}")
-            print(f"ACL: {ace['type']}")
+            print(f"Relation: {ace['type']}")
             print("-" * 50)
 
     def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False) -> List[Dict]:
@@ -287,7 +287,7 @@ class BloodHoundACEAnalyzer:
             print(f"Target: {ace['target']}")
             print(f"Target Type: {ace['targetType']}")
             print(f"Target Domain: {ace['targetDomain']}")
-            print(f"ACL: {ace['type']}")
+            print(f"Relation: {ace['type']}")
             print("-" * 50)
 
     def get_computers(self, domain: str, laps: bool = None) -> List[str]:
@@ -592,13 +592,13 @@ class BloodHoundACEAnalyzer:
                 MATCH (dc:Computer)-[r1:MemberOf*0..]->(g1:Group)
                 WHERE g1.objectid =~ "S-1-5-.*-516" AND toLower(dc.domain) = toLower($domain)
                 WITH COLLECT(dc) AS exclude
-                MATCH (c:Computer)-[n:HasSession]->(u:User)-[r2:MemberOf*1..]->(g2:Group)
+                MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})-[r2:MemberOf*1..]->(g2:Group)
                 WHERE NOT c IN exclude AND g2.objectid ENDS WITH "-544" AND toLower(c.domain) = toLower($domain)
                 RETURN DISTINCT toLower(c.name) AS computer, toLower(u.samaccountname) AS domain_admin
                 """
             else:
                 query = """
-                MATCH (c:Computer)-[n:HasSession]->(u:User)
+                MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})
                 WHERE toLower(c.domain) = toLower($domain)
                 RETURN DISTINCT toLower(c.name) AS computer
                 """
