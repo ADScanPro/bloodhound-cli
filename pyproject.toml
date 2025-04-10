@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bloodhound-cli"  # The package name as installed via pip (pip install bloodhound-cli)
-version = "0.1.20"          # Recommended semantic versioning
+version = "0.1.21"          # Recommended semantic versioning
 description = "CLI for querying BloodHound (Neo4j) data without using the GUI."
 readme = "README.md"
 authors = [
