@@ -154,6 +154,120 @@ class BloodHoundACEAnalyzer:
             print(f"Relation: {ace['type']}")
             print("-" * 50)
 
+    # ------------------- New Access Methods -------------------
+
+    def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
+        """
+        Constructs and executes a dynamic query based on the following three cases:
+          1. If source is not "all" and target is "all":
+             - Filters the start node by samaccountname and domain.
+          2. If source is "all" and target is "all":
+             - Returns all start nodes from the specified domain with enabled:true and no admincount.
+          3. If source is not "all" and target is "dcs":
+             - Filters the start node by samaccountname and domain and adds additional filtering for DCs (using objectid pattern).
+        The relationship type in the query is set based on the provided 'connection' parameter.
+        """
+        with self.driver.session() as session:
+            if source.lower() != "all" and target.lower() == "all":
+                query = f"""
+                MATCH p = (n {{samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
+                WHERE m.enabled = true
+                RETURN p
+                UNION
+                MATCH p = (n {{samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+                WHERE m.enabled = true
+                RETURN p
+                """
+                params = {"source": source, "domain": domain}
+            elif source.lower() == "all" and target.lower() == "all":
+                query = f"""
+                MATCH p = (n {{enabled:true, domain: $domain}})-[r:{connection}]->(m)
+                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+                RETURN p
+                UNION
+                MATCH p = (n {{enabled:true, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+                RETURN p
+                """
+                params = {"domain": domain}
+            elif source.lower() != "all" and target.lower() == "dcs":
+                query = f"""
+                MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
+                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+                  AND EXISTS {{
+                      MATCH (m)-[:MemberOf]->(dc:Group)
+                      WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+                  }}
+                RETURN p
+                UNION
+                MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+                  AND EXISTS {{
+                      MATCH (m)-[:MemberOf]->(dc:Group)
+                      WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+                  }}
+                RETURN p
+                """
+                params = {"source": source, "domain": domain}
+            else:
+                # In case of unsupported combination, return an empty list
+                return []
+            results = session.run(query, **params).data()
+            return results
+
+    def print_access(self, source: str, connection: str, target: str, domain: str):
+        """
+        Prints the access paths based on the provided parameters.
+        The output format is similar to that of print_aces.
+        """
+        results = self.get_access_paths(source, connection, target, domain)
+        print(f"\nAccess paths for source: {source}, connection: {connection}, target: {target}, domain: {domain}")
+        print("=" * 50)
+        if not results:
+            print("No access paths found")
+            return
+        for record in results:
+            # Get the path returned by the query
+            path = record["p"]
+            # Extract start and end nodes of the path
+            n = path.nodes[0]
+            m = path.nodes[-1]
+            # Get source and target values
+            source_value = n.get("samaccountname", n.get("name", "N/A"))
+            target_value = m.get("samaccountname", m.get("name", "N/A"))
+            # Get domains from nodes
+            source_domain = n.get("domain", "N/A")
+            target_domain = m.get("domain", "N/A")
+            
+            # Function to determine node type based on labels
+            def get_node_type(node):
+                if "User" in node.labels:
+                    return "User"
+                elif "Group" in node.labels:
+                    return "Group"
+                elif "Computer" in node.labels:
+                    return "Computer"
+                elif "OU" in node.labels:
+                    return "OU"
+                elif "GPO" in node.labels:
+                    return "GPO"
+                elif "Domain" in node.labels:
+                    return "Domain"
+                else:
+                    return "Other"
+            
+            source_type = get_node_type(n)
+            target_type = get_node_type(m)
+            print(f"\nSource: {source_value}")
+            print(f"Source Type: {source_type}")
+            print(f"Source Domain: {source_domain}")
+            print(f"Target: {target_value}")
+            print(f"Target Type: {target_type}")
+            print(f"Target Domain: {target_domain}")
+            print(f"Relation: {connection}")
+            print("-" * 50)
+    # ------------------- End of New Methods -------------------
+
     def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False) -> List[Dict]:
         with self.driver.session() as session:
             query = """
@@ -238,11 +352,13 @@ class BloodHoundACEAnalyzer:
                      ELSE n.name
                  END AS source,
                  CASE 
-                     WHEN 'User' IN labels(m) THEN m.samaccountname
-                     WHEN 'Group' IN labels(m) THEN m.samaccountname
-                     WHEN 'Computer' IN labels(m) THEN m.samaccountname
-                     WHEN 'OU' IN labels(m) THEN m.distinguishedname
-                     ELSE m.name
+                     WHEN 'User' IN labels(m) THEN 'User'
+                     WHEN 'Group' IN labels(m) THEN 'Group'
+                     WHEN 'Computer' IN labels(m) THEN 'Computer'
+                     WHEN 'OU' IN labels(m) THEN 'OU'
+                     WHEN 'GPO' IN labels(m) THEN 'GPO'
+                     WHEN 'Domain' IN labels(m) THEN 'Domain'
+                     ELSE 'Other'
                  END AS targetType,
                  CASE 
                      WHEN 'User' IN labels(m) THEN m.samaccountname
@@ -644,63 +760,6 @@ class BloodHoundACEAnalyzer:
             except Exception as e:
                 print(f"Error writing the file: {e}")
 
-def import_json_files(self, file_paths: List[str]) -> None:
-    """
-    Imports JSON files generated by SharpHound v4.3.1 into the BloodHound database.
-    Each file is assumed to have the structure: { "meta": { "type": "...", "count": ... }, "data": [ ... ] }
-    """
-    with self.driver.session() as session:
-        for file_path in file_paths:
-            print(f"\nProcesando archivo: {file_path}")
-            try:
-                with open(file_path, 'r', encoding='utf-8-sig') as f:
-                    data_obj = json.load(f)
-            except Exception as e:
-                print(f"Error al cargar {file_path}: {e}")
-                continue
-
-            if "meta" in data_obj and "data" in data_obj:
-                meta = data_obj["meta"]
-                data_type = meta.get("type", "").lower()  # e.g. "users", "computers", etc.
-                records = data_obj["data"]
-                # Convertir el plural a singular y capitalizar (e.g. "users" -> "User")
-                label = data_type[:-1].capitalize() if data_type.endswith("s") else data_type.capitalize()
-
-                for record in records:
-                    objectid = record.get("ObjectIdentifier")
-                    if not objectid:
-                        print(f"Saltando registro sin 'ObjectIdentifier': {record}")
-                        continue
-                    # Usamos siempre la etiqueta Base para identificar el nodo y se añade la etiqueta específica
-                    cypher = "MERGE (n:Base {objectid: $id}) "
-                    if label:
-                        cypher += f"SET n:{label} "
-                    # Se asignan las propiedades; se utiliza 'Properties' si existe, sino se usa el registro completo
-                    props = record.get("Properties", record)
-                    cypher += "SET n += $props"
-                    session.run(cypher, id=objectid, props=props)
-
-                    # Procesar ACLs (Aces) si existen en el nodo
-                    aces = record.get("Aces")
-                    if aces:
-                        for ace in aces:
-                            principal = ace.get("PrincipalSID")
-                            if not principal or principal == objectid:
-                                continue
-                            reltype = ace.get("RightName")
-                            isinherited = ace.get("IsInherited", False)
-                            rel_cypher = f"""
-                            MATCH (p:Base {{objectid: $principal}})
-                            MATCH (o:Base {{objectid: $objectid}})
-                            MERGE (p)-[r:{reltype}]->(o)
-                            SET r += {{isacl: true, isinherited: $isinherited}}
-                            """
-                            session.run(rel_cypher, principal=principal, objectid=objectid, isinherited=isinherited)
-                print(f"Importados {len(records)} registros de '{data_type}' desde {file_path}")
-            else:
-                # Si la estructura es diferente, se puede implementar un método de respaldo
-                print(f"Estructura desconocida en {file_path}, saltando el archivo.")
-
 def save_config(host: str, port: str, db_user: str, db_password: str):
     """Saves the Neo4j connection configuration to a file in the user's directory."""
     config = configparser.ConfigParser()
@@ -778,6 +837,13 @@ def main():
     parser_session.add_argument("--da", action="store_true", help="Show only sessions for domain admins")
     parser_session.add_argument("-o", "--output", help="Path to file to save results")
 
+    # access subcommand (new)
+    parser_access = subparsers.add_parser("access", help="Query access paths in BloodHound")
+    parser_access.add_argument("-s", "--source", required=True, help="Source samaccountname or 'all'")
+    parser_access.add_argument("-c", "--connection", required=True, choices=["AdminTo", "CanRDP", "CanPSRemote"], help="Type of connection")
+    parser_access.add_argument("-t", "--target", required=True, choices=["all", "dcs"], help="Target type")
+    parser_access.add_argument("-d", "--domain", required=True, help="Domain for filtering nodes")
+
     args = parser.parse_args()
 
     if args.subcommand == "set":
@@ -836,6 +902,8 @@ def main():
             analyzer.import_json_files(args.file)
         elif args.subcommand == "session":
             analyzer.print_sessions(args.domain, da=args.da, output=args.output)
+        elif args.subcommand == "access":
+            analyzer.print_access(args.source, args.connection, args.target, args.domain)
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
