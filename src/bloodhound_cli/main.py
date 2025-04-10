@@ -5,8 +5,8 @@ import configparser
 from neo4j import GraphDatabase
 import argparse
 from typing import List, Dict
-import json
 from datetime import datetime, timezone
+import re
 
 CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
@@ -20,16 +20,35 @@ class BloodHoundACEAnalyzer:
         """Closes the connection with Neo4j."""
         self.driver.close()
 
+    def render_query(self, query: str, params: dict) -> str:
+        """
+        Returns a string with the query where placeholders (like $param) are replaced by
+        their actual values (strings are wrapped with quotes).
+        This is only for debugging purposes.
+        """
+        def replacer(match):
+            key = match.group(0)[1:]
+            value = params.get(key)
+            if isinstance(value, str):
+                return f"'{value}'"
+            else:
+                return str(value)
+        return re.sub(r'\$\w+', replacer, query)
+
     def execute_query(self, query: str, **params) -> List:
         """
         Helper method to execute a Cypher query.
-        If debug is enabled, prints the query and parameters before executing.
+        If debug is enabled, prints the original query with its parameters, plus
+        a fully rendered query with parameters substituted.
         """
         with self.driver.session() as session:
             if self.debug:
                 print("DEBUG: Executing query:")
                 print(query.strip())
                 print("DEBUG: With parameters:", params)
+                rendered_query = self.render_query(query, params)
+                print("DEBUG: Fully rendered query:")
+                print(rendered_query)
             return session.run(query, **params).data()
 
     def get_critical_aces(self, username: str, high_value: bool = False) -> List[Dict]:
@@ -148,61 +167,322 @@ class BloodHoundACEAnalyzer:
         results = self.execute_query(query, samaccountname=username)
         return [r["result"] for r in results]
 
-    # ------------------- New Access Methods -------------------
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
         """
         Constructs and executes a dynamic query based on the following three cases:
-          1. If source is not "all" and target is "all":
-             - Filters the start node by samaccountname and domain.
-          2. If source is "all" and target is "all":
-             - Returns all start nodes from the specified domain with enabled:true and no admincount.
-          3. If source is not "all" and target is "dcs":
-             - Filters the start node by samaccountname and domain and adds additional filtering for DCs.
+        1. If source is not "all" and target is "all":
+            - Filters the start node by samaccountname and domain (both case-insensitively).
+        2. If source is "all" and target is "all":
+            - Returns all start nodes from the specified domain with enabled:true and no admincount.
+        3. If source is not "all" and target is "dcs":
+            - Filters the start node by samaccountname and domain (case-insensitively) and adds additional filtering for DCs.
         The relationship type in the query is set based on the provided 'connection' parameter.
+        The query returns a dictionary (as result) with the same keys as get_critical_aces().
         """
         if source.lower() != "all" and target.lower() == "all":
             query = f"""
-            MATCH p = (n {{samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
-            WHERE m.enabled = true
-            RETURN p
+            MATCH p = (n)-[r:{connection}]->(m)
+            WHERE toLower(n.samaccountname) = toLower($source)
+            AND toLower(n.domain) = toLower($domain)
+            AND m.enabled = true
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n {{samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-            WHERE m.enabled = true
-            RETURN p
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE toLower(n.samaccountname) = toLower($source)
+            AND toLower(n.domain) = toLower($domain)
+            AND m.enabled = true
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             """
             params = {"source": source, "domain": domain}
         elif source.lower() == "all" and target.lower() == "all":
             query = f"""
-            MATCH p = (n {{enabled:true, domain: $domain}})-[r:{connection}]->(m)
-            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-            RETURN p
+            MATCH p = (n)-[r:{connection}]->(m)
+            WHERE n.enabled = true
+            AND toLower(n.domain) = toLower($domain)
+            AND (n.admincount IS NULL OR n.admincount = false)
+            AND m.enabled = true
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n {{enabled:true, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-            RETURN p
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE n.enabled = true
+            AND toLower(n.domain) = toLower($domain)
+            AND (n.admincount IS NULL OR n.admincount = false)
+            AND m.enabled = true
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             """
             params = {"domain": domain}
-        elif source.lower() != "all" and target.lower() == "dcs":
+        elif source.lower() == "all" and target.lower() == "dcs":
             query = f"""
-            MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
-            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-              AND EXISTS {{
-                  MATCH (m)-[:MemberOf]->(dc:Group)
-                  WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
-              }}
-            RETURN p
+            MATCH p = (n)-[r:{connection}]->(m)
+            WHERE n.enabled = true
+            AND toLower(n.domain) = toLower($domain)
+            AND m.enabled = true
+            AND (n.admincount IS NULL OR n.admincount = false)
+            AND EXISTS {{
+                MATCH (m)-[:MemberOf]->(dc:Group)
+                WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+            }}
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             UNION
-            MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-              AND EXISTS {{
-                  MATCH (m)-[:MemberOf]->(dc:Group)
-                  WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
-              }}
-            RETURN p
+            MATCH p = (n)-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE n.enabled = true
+            AND toLower(n.domain) = toLower($domain)
+            AND m.enabled = true
+            AND (n.admincount IS NULL OR n.admincount = false)
+            AND EXISTS {{
+                MATCH (m)-[:MemberOf]->(dc:Group)
+                WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+            }}
+            WITH n, m, r,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN 'User'
+                    WHEN 'Group' IN labels(n) THEN 'Group'
+                    WHEN 'Computer' IN labels(n) THEN 'Computer'
+                    WHEN 'OU' IN labels(n) THEN 'OU'
+                    WHEN 'GPO' IN labels(n) THEN 'GPO'
+                    WHEN 'Domain' IN labels(n) THEN 'Domain'
+                    ELSE 'Other'
+                END AS sourceType,
+                CASE 
+                    WHEN 'User' IN labels(n) THEN n.samaccountname
+                    WHEN 'Group' IN labels(n) THEN n.samaccountname
+                    WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                    WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                    ELSE n.name
+                END AS source,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN 'User'
+                    WHEN 'Group' IN labels(m) THEN 'Group'
+                    WHEN 'Computer' IN labels(m) THEN 'Computer'
+                    WHEN 'OU' IN labels(m) THEN 'OU'
+                    WHEN 'GPO' IN labels(m) THEN 'GPO'
+                    WHEN 'Domain' IN labels(m) THEN 'Domain'
+                    ELSE 'Other'
+                END AS targetType,
+                CASE 
+                    WHEN 'User' IN labels(m) THEN m.samaccountname
+                    WHEN 'Group' IN labels(m) THEN m.samaccountname
+                    WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                    WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                    ELSE m.name
+                END AS target,
+                CASE
+                    WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                    ELSE 'N/A'
+                END AS sourceDomain,
+                CASE
+                    WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                    ELSE 'N/A'
+                END AS targetDomain
+            RETURN DISTINCT {{ source: source, sourceType: sourceType, target: target, targetType: targetType, type: type(r), sourceDomain: sourceDomain, targetDomain: targetDomain }} AS result
             """
-            params = {"source": source, "domain": domain}
+            params = {"domain": domain}
         else:
-            # In case of unsupported combination, return an empty list
             return []
         return self.execute_query(query, **params)
 
@@ -210,6 +490,7 @@ class BloodHoundACEAnalyzer:
         """
         Prints the access paths based on the provided parameters.
         The output format is similar to that of print_aces.
+        Expects each record to contain the key 'result' (a dictionary with the desired fields).
         """
         results = self.get_access_paths(source, connection, target, domain)
         print(f"\nAccess paths for source: {source}, connection: {connection}, target: {target}, domain: {domain}")
@@ -218,41 +499,17 @@ class BloodHoundACEAnalyzer:
             print("No access paths found")
             return
         for record in results:
-            # Get the path returned by the query
-            path = record["p"]
-            # Extract start and end nodes of the path
-            n = path.nodes[0]
-            m = path.nodes[-1]
-            source_value = n.get("samaccountname", n.get("name", "N/A"))
-            target_value = m.get("samaccountname", m.get("name", "N/A"))
-            source_domain = n.get("domain", "N/A")
-            target_domain = m.get("domain", "N/A")
-            def get_node_type(node):
-                if "User" in node.labels:
-                    return "User"
-                elif "Group" in node.labels:
-                    return "Group"
-                elif "Computer" in node.labels:
-                    return "Computer"
-                elif "OU" in node.labels:
-                    return "OU"
-                elif "GPO" in node.labels:
-                    return "GPO"
-                elif "Domain" in node.labels:
-                    return "Domain"
-                else:
-                    return "Other"
-            source_type = get_node_type(n)
-            target_type = get_node_type(m)
-            print(f"\nSource: {source_value}")
-            print(f"Source Type: {source_type}")
-            print(f"Source Domain: {source_domain}")
-            print(f"Target: {target_value}")
-            print(f"Target Type: {target_type}")
-            print(f"Target Domain: {target_domain}")
-            print(f"Relation: {connection}")
+            ace = record.get("result")
+            if not ace:
+                continue
+            print(f"\nSource: {ace['source']}")
+            print(f"Source Type: {ace['sourceType']}")
+            print(f"Source Domain: {ace['sourceDomain']}")
+            print(f"Target: {ace['target']}")
+            print(f"Target Type: {ace['targetType']}")
+            print(f"Target Domain: {ace['targetDomain']}")
+            print(f"Relation: {ace['type']}")
             print("-" * 50)
-    # ------------------- End of New Methods -------------------
 
     def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False) -> List[Dict]:
         query = """
