@@ -5,157 +5,150 @@ import configparser
 from neo4j import GraphDatabase
 import argparse
 from typing import List, Dict
-import json 
+import json
 from datetime import datetime, timezone
 
 CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
 class BloodHoundACEAnalyzer:
-    def __init__(self, uri: str, user: str, password: str):
+    def __init__(self, uri: str, user: str, password: str, debug: bool = False):
         """Initializes the connection with Neo4j."""
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self.debug = debug
 
     def close(self):
         """Closes the connection with Neo4j."""
         self.driver.close()
 
+    def execute_query(self, query: str, **params) -> List:
+        """
+        Helper method to execute a Cypher query.
+        If debug is enabled, prints the query and parameters before executing.
+        """
+        with self.driver.session() as session:
+            if self.debug:
+                print("DEBUG: Executing query:")
+                print(query.strip())
+                print("DEBUG: With parameters:", params)
+            return session.run(query, **params).data()
+
     def get_critical_aces(self, username: str, high_value: bool = False) -> List[Dict]:
         """Queries ACLs for a specific user."""
-        with self.driver.session() as session:
-            query = """
-            MATCH p=(n)-[r1]->(m)
-            WHERE toLower(n.samaccountname) = toLower($samaccountname)
-              AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
-              """ + ("""AND m.highvalue = true""" if high_value else "") + """
-            WITH n, m, r1,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN 'User'
-                     WHEN 'Group' IN labels(n) THEN 'Group'
-                     WHEN 'Computer' IN labels(n) THEN 'Computer'
-                     WHEN 'OU' IN labels(n) THEN 'OU'
-                     WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS sourceType,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN n.samaccountname
-                     WHEN 'Group' IN labels(n) THEN n.samaccountname
-                     WHEN 'Computer' IN labels(n) THEN n.samaccountname
-                     WHEN 'OU' IN labels(n) THEN n.distinguishedname
-                     ELSE n.name
-                 END AS source,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN 'User'
-                     WHEN 'Group' IN labels(m) THEN 'Group'
-                     WHEN 'Computer' IN labels(m) THEN 'Computer'
-                     WHEN 'OU' IN labels(m) THEN 'OU'
-                     WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS targetType,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN m.samaccountname
-                     WHEN 'Group' IN labels(m) THEN m.samaccountname
-                     WHEN 'Computer' IN labels(m) THEN m.samaccountname
-                     WHEN 'OU' IN labels(m) THEN m.distinguishedname
-                     ELSE m.name
-                 END AS target,
-                 CASE
-                     WHEN n.domain IS NOT NULL THEN toLower(n.domain)
-                     ELSE 'N/A'
-                 END AS sourceDomain,
-                 CASE
-                     WHEN m.domain IS NOT NULL THEN toLower(m.domain)
-                     ELSE 'N/A'
-                 END AS targetDomain
-            RETURN DISTINCT {
-                source: source,
-                sourceType: sourceType,
-                target: target,
-                targetType: targetType,
-                type: type(r1),
-                sourceDomain: sourceDomain,
-                targetDomain: targetDomain
-            } AS result
-            UNION
-            MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
-            WHERE toLower(n.samaccountname) = toLower($samaccountname)
-              AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
-              """ + ("""AND m.highvalue = true""" if high_value else "") + """
-            WITH n, m, r1,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN 'User'
-                     WHEN 'Group' IN labels(n) THEN 'Group'
-                     WHEN 'Computer' IN labels(n) THEN 'Computer'
-                     WHEN 'OU' IN labels(n) THEN 'OU'
-                     WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS sourceType,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN n.samaccountname
-                     WHEN 'Group' IN labels(n) THEN n.samaccountname
-                     WHEN 'Computer' IN labels(n) THEN n.samaccountname
-                     WHEN 'OU' IN labels(n) THEN n.distinguishedname
-                     ELSE n.name
-                 END AS source,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN 'User'
-                     WHEN 'Group' IN labels(m) THEN 'Group'
-                     WHEN 'Computer' IN labels(m) THEN 'Computer'
-                     WHEN 'OU' IN labels(m) THEN 'OU'
-                     WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS targetType,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN m.samaccountname
-                     WHEN 'Group' IN labels(m) THEN m.samaccountname
-                     WHEN 'Computer' IN labels(m) THEN m.samaccountname
-                     WHEN 'OU' IN labels(m) THEN m.distinguishedname
-                     ELSE m.name
-                 END AS target,
-                 CASE
-                     WHEN n.domain IS NOT NULL THEN toLower(n.domain)
-                     ELSE 'N/A'
-                 END AS sourceDomain,
-                 CASE
-                     WHEN m.domain IS NOT NULL THEN toLower(m.domain)
-                     ELSE 'N/A'
-                 END AS targetDomain
-            RETURN DISTINCT {
-                source: source,
-                sourceType: sourceType,
-                target: target,
-                targetType: targetType,
-                type: type(r1),
-                sourceDomain: sourceDomain,
-                targetDomain: targetDomain
-            } AS result
-            """
-            results = session.run(query, samaccountname=username).data()
-            return [r["result"] for r in results]
-
-    def print_aces(self, username: str, high_value: bool = False):
-        aces = self.get_critical_aces(username, high_value)
-        value_suffix = " (high-value targets only)" if high_value else ""
-        print(f"\nACLs for user: {username}{value_suffix}")
-        print("=" * 50)
-        if not aces:
-            print("No ACLs found for this user")
-            return
-        for ace in aces:
-            print(f"\nSource: {ace['source']}")
-            print(f"Source Type: {ace['sourceType']}")
-            print(f"Source Domain: {ace['sourceDomain']}")
-            print(f"Target: {ace['target']}")
-            print(f"Target Type: {ace['targetType']}")
-            print(f"Target Domain: {ace['targetDomain']}")
-            print(f"Relation: {ace['type']}")
-            print("-" * 50)
+        query = """
+        MATCH p=(n)-[r1]->(m)
+        WHERE toLower(n.samaccountname) = toLower($samaccountname)
+          AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        WITH n, m, r1,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN 'User'
+                 WHEN 'Group' IN labels(n) THEN 'Group'
+                 WHEN 'Computer' IN labels(n) THEN 'Computer'
+                 WHEN 'OU' IN labels(n) THEN 'OU'
+                 WHEN 'GPO' IN labels(n) THEN 'GPO'
+                 WHEN 'Domain' IN labels(n) THEN 'Domain'
+                 ELSE 'Other'
+             END AS sourceType,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN n.samaccountname
+                 WHEN 'Group' IN labels(n) THEN n.samaccountname
+                 WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                 WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                 ELSE n.name
+             END AS source,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN 'User'
+                 WHEN 'Group' IN labels(m) THEN 'Group'
+                 WHEN 'Computer' IN labels(m) THEN 'Computer'
+                 WHEN 'OU' IN labels(m) THEN 'OU'
+                 WHEN 'GPO' IN labels(m) THEN 'GPO'
+                 WHEN 'Domain' IN labels(m) THEN 'Domain'
+                 ELSE 'Other'
+             END AS targetType,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN m.samaccountname
+                 WHEN 'Group' IN labels(m) THEN m.samaccountname
+                 WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                 WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                 ELSE m.name
+             END AS target,
+             CASE
+                 WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                 ELSE 'N/A'
+             END AS sourceDomain,
+             CASE
+                 WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                 ELSE 'N/A'
+             END AS targetDomain
+        RETURN DISTINCT {
+            source: source,
+            sourceType: sourceType,
+            target: target,
+            targetType: targetType,
+            type: type(r1),
+            sourceDomain: sourceDomain,
+            targetDomain: targetDomain
+        } AS result
+        UNION
+        MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
+        WHERE toLower(n.samaccountname) = toLower($samaccountname)
+          AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        WITH n, m, r1,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN 'User'
+                 WHEN 'Group' IN labels(n) THEN 'Group'
+                 WHEN 'Computer' IN labels(n) THEN 'Computer'
+                 WHEN 'OU' IN labels(n) THEN 'OU'
+                 WHEN 'GPO' IN labels(n) THEN 'GPO'
+                 WHEN 'Domain' IN labels(n) THEN 'Domain'
+                 ELSE 'Other'
+             END AS sourceType,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN n.samaccountname
+                 WHEN 'Group' IN labels(n) THEN n.samaccountname
+                 WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                 WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                 ELSE n.name
+             END AS source,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN 'User'
+                 WHEN 'Group' IN labels(m) THEN 'Group'
+                 WHEN 'Computer' IN labels(m) THEN 'Computer'
+                 WHEN 'OU' IN labels(m) THEN 'OU'
+                 WHEN 'GPO' IN labels(m) THEN 'GPO'
+                 WHEN 'Domain' IN labels(m) THEN 'Domain'
+                 ELSE 'Other'
+             END AS targetType,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN m.samaccountname
+                 WHEN 'Group' IN labels(m) THEN m.samaccountname
+                 WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                 WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                 ELSE m.name
+             END AS target,
+             CASE
+                 WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                 ELSE 'N/A'
+             END AS sourceDomain,
+             CASE
+                 WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                 ELSE 'N/A'
+             END AS targetDomain
+        RETURN DISTINCT {
+            source: source,
+            sourceType: sourceType,
+            target: target,
+            targetType: targetType,
+            type: type(r1),
+            sourceDomain: sourceDomain,
+            targetDomain: targetDomain
+        } AS result
+        """
+        results = self.execute_query(query, samaccountname=username)
+        return [r["result"] for r in results]
 
     # ------------------- New Access Methods -------------------
-
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
         """
         Constructs and executes a dynamic query based on the following three cases:
@@ -164,56 +157,54 @@ class BloodHoundACEAnalyzer:
           2. If source is "all" and target is "all":
              - Returns all start nodes from the specified domain with enabled:true and no admincount.
           3. If source is not "all" and target is "dcs":
-             - Filters the start node by samaccountname and domain and adds additional filtering for DCs (using objectid pattern).
+             - Filters the start node by samaccountname and domain and adds additional filtering for DCs.
         The relationship type in the query is set based on the provided 'connection' parameter.
         """
-        with self.driver.session() as session:
-            if source.lower() != "all" and target.lower() == "all":
-                query = f"""
-                MATCH p = (n {{samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
-                WHERE m.enabled = true
-                RETURN p
-                UNION
-                MATCH p = (n {{samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-                WHERE m.enabled = true
-                RETURN p
-                """
-                params = {"source": source, "domain": domain}
-            elif source.lower() == "all" and target.lower() == "all":
-                query = f"""
-                MATCH p = (n {{enabled:true, domain: $domain}})-[r:{connection}]->(m)
-                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-                RETURN p
-                UNION
-                MATCH p = (n {{enabled:true, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-                RETURN p
-                """
-                params = {"domain": domain}
-            elif source.lower() != "all" and target.lower() == "dcs":
-                query = f"""
-                MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
-                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-                  AND EXISTS {{
-                      MATCH (m)-[:MemberOf]->(dc:Group)
-                      WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
-                  }}
-                RETURN p
-                UNION
-                MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
-                WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
-                  AND EXISTS {{
-                      MATCH (m)-[:MemberOf]->(dc:Group)
-                      WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
-                  }}
-                RETURN p
-                """
-                params = {"source": source, "domain": domain}
-            else:
-                # In case of unsupported combination, return an empty list
-                return []
-            results = session.run(query, **params).data()
-            return results
+        if source.lower() != "all" and target.lower() == "all":
+            query = f"""
+            MATCH p = (n {{samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
+            WHERE m.enabled = true
+            RETURN p
+            UNION
+            MATCH p = (n {{samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE m.enabled = true
+            RETURN p
+            """
+            params = {"source": source, "domain": domain}
+        elif source.lower() == "all" and target.lower() == "all":
+            query = f"""
+            MATCH p = (n {{enabled:true, domain: $domain}})-[r:{connection}]->(m)
+            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+            RETURN p
+            UNION
+            MATCH p = (n {{enabled:true, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+            RETURN p
+            """
+            params = {"domain": domain}
+        elif source.lower() != "all" and target.lower() == "dcs":
+            query = f"""
+            MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[r:{connection}]->(m)
+            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+              AND EXISTS {{
+                  MATCH (m)-[:MemberOf]->(dc:Group)
+                  WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+              }}
+            RETURN p
+            UNION
+            MATCH p = (n {{enabled:true, samaccountname: $source, domain: $domain}})-[:MemberOf*1..]->(g:Group)-[r:{connection}]->(m)
+            WHERE m.enabled = true AND (n.admincount IS NULL OR n.admincount = false)
+              AND EXISTS {{
+                  MATCH (m)-[:MemberOf]->(dc:Group)
+                  WHERE dc.objectid =~ '(?i)S-1-5-.*-516'
+              }}
+            RETURN p
+            """
+            params = {"source": source, "domain": domain}
+        else:
+            # In case of unsupported combination, return an empty list
+            return []
+        return self.execute_query(query, **params)
 
     def print_access(self, source: str, connection: str, target: str, domain: str):
         """
@@ -232,14 +223,10 @@ class BloodHoundACEAnalyzer:
             # Extract start and end nodes of the path
             n = path.nodes[0]
             m = path.nodes[-1]
-            # Get source and target values
             source_value = n.get("samaccountname", n.get("name", "N/A"))
             target_value = m.get("samaccountname", m.get("name", "N/A"))
-            # Get domains from nodes
             source_domain = n.get("domain", "N/A")
             target_domain = m.get("domain", "N/A")
-            
-            # Function to determine node type based on labels
             def get_node_type(node):
                 if "User" in node.labels:
                     return "User"
@@ -255,7 +242,6 @@ class BloodHoundACEAnalyzer:
                     return "Domain"
                 else:
                     return "Other"
-            
             source_type = get_node_type(n)
             target_type = get_node_type(m)
             print(f"\nSource: {source_value}")
@@ -269,124 +255,295 @@ class BloodHoundACEAnalyzer:
     # ------------------- End of New Methods -------------------
 
     def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False) -> List[Dict]:
-        with self.driver.session() as session:
+        query = """
+        MATCH p=(n)-[r1]->(m)
+        WHERE r1.isacl = true
+          AND toUpper(n.domain) = toUpper($domain)
+          AND toUpper(n.domain) <> toUpper(m.domain)
+          AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
+          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        WITH n, m, r1,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN 'User'
+                 WHEN 'Group' IN labels(n) THEN 'Group'
+                 WHEN 'Computer' IN labels(n) THEN 'Computer'
+                 WHEN 'OU' IN labels(n) THEN 'OU'
+                 WHEN 'GPO' IN labels(n) THEN 'GPO'
+                 WHEN 'Domain' IN labels(n) THEN 'Domain'
+                 ELSE 'Other'
+             END AS sourceType,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN n.samaccountname
+                 WHEN 'Group' IN labels(n) THEN n.samaccountname
+                 WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                 WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                 ELSE n.name
+             END AS source,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN 'User'
+                 WHEN 'Group' IN labels(m) THEN 'Group'
+                 WHEN 'Computer' IN labels(m) THEN 'Computer'
+                 WHEN 'OU' IN labels(m) THEN 'OU'
+                 WHEN 'GPO' IN labels(m) THEN 'GPO'
+                 WHEN 'Domain' IN labels(m) THEN 'Domain'
+                 ELSE 'Other'
+             END AS targetType,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN m.samaccountname
+                 WHEN 'Group' IN labels(m) THEN m.samaccountname
+                 WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                 WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                 ELSE m.name
+             END AS target,
+             CASE
+                 WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                 ELSE 'N/A'
+             END AS sourceDomain,
+             CASE
+                 WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                 ELSE 'N/A'
+             END AS targetDomain
+        RETURN DISTINCT {
+            source: source,
+            sourceType: sourceType,
+            target: target,
+            targetType: targetType,
+            type: type(r1),
+            sourceDomain: sourceDomain,
+            targetDomain: targetDomain
+        } AS result
+        UNION
+        MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
+        WHERE r1.isacl = true
+          AND toUpper(n.domain) = toUpper($domain)
+          AND toUpper(n.domain) <> toUpper(m.domain)
+          AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
+          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        WITH n, m, r1,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN 'User'
+                 WHEN 'Group' IN labels(n) THEN 'Group'
+                 WHEN 'Computer' IN labels(n) THEN 'Computer'
+                 WHEN 'OU' IN labels(n) THEN 'OU'
+                 WHEN 'GPO' IN labels(n) THEN 'GPO'
+                 WHEN 'Domain' IN labels(n) THEN 'Domain'
+                 ELSE 'Other'
+             END AS sourceType,
+             CASE 
+                 WHEN 'User' IN labels(n) THEN n.samaccountname
+                 WHEN 'Group' IN labels(n) THEN n.samaccountname
+                 WHEN 'Computer' IN labels(n) THEN n.samaccountname
+                 WHEN 'OU' IN labels(n) THEN n.distinguishedname
+                 ELSE n.name
+             END AS source,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN 'User'
+                 WHEN 'Group' IN labels(m) THEN 'Group'
+                 WHEN 'Computer' IN labels(m) THEN 'Computer'
+                 WHEN 'OU' IN labels(m) THEN 'OU'
+                 WHEN 'GPO' IN labels(m) THEN 'GPO'
+                 WHEN 'Domain' IN labels(m) THEN 'Domain'
+                 ELSE 'Other'
+             END AS targetType,
+             CASE 
+                 WHEN 'User' IN labels(m) THEN m.samaccountname
+                 WHEN 'Group' IN labels(m) THEN m.samaccountname
+                 WHEN 'Computer' IN labels(m) THEN m.samaccountname
+                 WHEN 'OU' IN labels(m) THEN m.distinguishedname
+                 ELSE m.name
+             END AS target,
+             CASE
+                 WHEN n.domain IS NOT NULL THEN toLower(n.domain)
+                 ELSE 'N/A'
+             END AS sourceDomain,
+             CASE
+                 WHEN m.domain IS NOT NULL THEN toLower(m.domain)
+                 ELSE 'N/A'
+             END AS targetDomain
+        RETURN DISTINCT {
+            source: source,
+            sourceType: sourceType,
+            target: target,
+            targetType: targetType,
+            type: type(r1),
+            sourceDomain: sourceDomain,
+            targetDomain: targetDomain
+        } AS result
+        """
+        results = self.execute_query(query, domain=domain.upper(), blacklist=[d.upper() for d in blacklist])
+        return [r["result"] for r in results]
+
+    def get_computers(self, domain: str, laps: bool = None) -> List[str]:
+        if laps is None:
             query = """
-            MATCH p=(n)-[r1]->(m)
-            WHERE r1.isacl = true
-              AND toUpper(n.domain) = toUpper($domain)
-              AND toUpper(n.domain) <> toUpper(m.domain)
-              AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
-              """ + ("""AND m.highvalue = true""" if high_value else "") + """
-            WITH n, m, r1,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN 'User'
-                     WHEN 'Group' IN labels(n) THEN 'Group'
-                     WHEN 'Computer' IN labels(n) THEN 'Computer'
-                     WHEN 'OU' IN labels(n) THEN 'OU'
-                     WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS sourceType,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN n.samaccountname
-                     WHEN 'Group' IN labels(n) THEN n.samaccountname
-                     WHEN 'Computer' IN labels(n) THEN n.samaccountname
-                     WHEN 'OU' IN labels(n) THEN n.distinguishedname
-                     ELSE n.name
-                 END AS source,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN 'User'
-                     WHEN 'Group' IN labels(m) THEN 'Group'
-                     WHEN 'Computer' IN labels(m) THEN 'Computer'
-                     WHEN 'OU' IN labels(m) THEN 'OU'
-                     WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS targetType,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN m.samaccountname
-                     WHEN 'Group' IN labels(m) THEN m.samaccountname
-                     WHEN 'Computer' IN labels(m) THEN m.samaccountname
-                     WHEN 'OU' IN labels(m) THEN m.distinguishedname
-                     ELSE m.name
-                 END AS target,
-                 CASE
-                     WHEN n.domain IS NOT NULL THEN toLower(n.domain)
-                     ELSE 'N/A'
-                 END AS sourceDomain,
-                 CASE
-                     WHEN m.domain IS NOT NULL THEN toLower(m.domain)
-                     ELSE 'N/A'
-                 END AS targetDomain
-            RETURN DISTINCT {
-                source: source,
-                sourceType: sourceType,
-                target: target,
-                targetType: targetType,
-                type: type(r1),
-                sourceDomain: sourceDomain,
-                targetDomain: targetDomain
-            } AS result
-            UNION
-            MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
-            WHERE r1.isacl = true
-              AND toUpper(n.domain) = toUpper($domain)
-              AND toUpper(n.domain) <> toUpper(m.domain)
-              AND (size($blacklist) = 0 OR NOT toUpper(m.domain) IN $blacklist)
-              """ + ("""AND m.highvalue = true""" if high_value else "") + """
-            WITH n, m, r1,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN 'User'
-                     WHEN 'Group' IN labels(n) THEN 'Group'
-                     WHEN 'Computer' IN labels(n) THEN 'Computer'
-                     WHEN 'OU' IN labels(n) THEN 'OU'
-                     WHEN 'GPO' IN labels(n) THEN 'GPO'
-                     WHEN 'Domain' IN labels(n) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS sourceType,
-                 CASE 
-                     WHEN 'User' IN labels(n) THEN n.samaccountname
-                     WHEN 'Group' IN labels(n) THEN n.samaccountname
-                     WHEN 'Computer' IN labels(n) THEN n.samaccountname
-                     WHEN 'OU' IN labels(n) THEN n.distinguishedname
-                     ELSE n.name
-                 END AS source,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN 'User'
-                     WHEN 'Group' IN labels(m) THEN 'Group'
-                     WHEN 'Computer' IN labels(m) THEN 'Computer'
-                     WHEN 'OU' IN labels(m) THEN 'OU'
-                     WHEN 'GPO' IN labels(m) THEN 'GPO'
-                     WHEN 'Domain' IN labels(m) THEN 'Domain'
-                     ELSE 'Other'
-                 END AS targetType,
-                 CASE 
-                     WHEN 'User' IN labels(m) THEN m.samaccountname
-                     WHEN 'Group' IN labels(m) THEN m.samaccountname
-                     WHEN 'Computer' IN labels(m) THEN m.samaccountname
-                     WHEN 'OU' IN labels(m) THEN m.distinguishedname
-                     ELSE m.name
-                 END AS target,
-                 CASE
-                     WHEN n.domain IS NOT NULL THEN toLower(n.domain)
-                     ELSE 'N/A'
-                 END AS sourceDomain,
-                 CASE
-                     WHEN m.domain IS NOT NULL THEN toLower(m.domain)
-                     ELSE 'N/A'
-                 END AS targetDomain
-            RETURN DISTINCT {
-                source: source,
-                sourceType: sourceType,
-                target: target,
-                targetType: targetType,
-                type: type(r1),
-                sourceDomain: sourceDomain,
-                targetDomain: targetDomain
-            } AS result
+            MATCH (c:Computer)
+            WHERE toLower(c.domain) = toLower($domain) AND c.enabled = true
+            RETURN toLower(c.name) AS name
             """
-            results = session.run(query, domain=domain.upper(), blacklist=[d.upper() for d in blacklist]).data()
-            return [r["result"] for r in results]
+            params = {"domain": domain}
+        else:
+            query = """
+            MATCH (c:Computer)
+            WHERE toLower(c.domain) = toLower($domain)
+              AND c.haslaps = $laps AND c.enabled = true
+            RETURN toLower(c.name) AS name
+            """
+            params = {"domain": domain, "laps": laps}
+        results = self.execute_query(query, **params)
+        return [record["name"] for record in results]
+
+    def get_users(self, domain: str) -> List[str]:
+        query = """
+        MATCH (u:User)
+        WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        """
+        results = self.execute_query(query, domain=domain)
+        return [record["samaccountname"] for record in results]
+
+    def get_password_last_change(self, domain: str, user: str = None) -> List[dict]:
+        """
+        Retrieves the pwdlastset value and the whencreated value for enabled users in the specified domain.
+        If a user is specified, only returns the record for that user.
+        """
+        if user:
+            query = """
+            MATCH (u:User)
+            WHERE toLower(u.domain) = toLower($domain)
+              AND toLower(u.samaccountname) = toLower($user)
+            RETURN toLower(u.samaccountname) AS user, 
+                   u.pwdlastset AS password_last_change,
+                   u.whencreated AS when_created
+            """
+            params = {"domain": domain, "user": user}
+        else:
+            query = """
+            MATCH (u:User)
+            WHERE u.enabled = true
+              AND toLower(u.domain) = toLower($domain)
+            RETURN toLower(u.samaccountname) AS user, 
+                   u.pwdlastset AS password_last_change,
+                   u.whencreated AS when_created
+            """
+            params = {"domain": domain}
+        return self.execute_query(query, **params)
+
+    def get_admin_users(self, domain: str) -> List[str]:
+        query = """
+        MATCH p=(u:User)-[:MemberOf*1..]->(g:Group)
+        WHERE g.admincount = true
+          AND u.admincount = false
+          AND u.enabled = true
+          AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        UNION
+        MATCH (u:User {admincount:true})
+        WHERE u.enabled = true
+          AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        """
+        results = self.execute_query(query, domain=domain)
+        return [record["samaccountname"] for record in results]
+
+    def get_highvalue_users(self, domain: str) -> List[str]:
+        query = """
+        MATCH (u:User {highvalue: true})
+        WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        UNION
+        MATCH p=(u:User)-[:MemberOf*1..]->(g:Group {highvalue: true})-[r1]->(m)
+        WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        """
+        results = self.execute_query(query, domain=domain)
+        return [record["samaccountname"] for record in results]
+
+    def get_password_not_required_users(self, domain: str) -> List[str]:
+        query = """
+        MATCH (u:User)
+        WHERE u.enabled = true
+          AND u.passwordnotreqd = true
+          AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        """
+        results = self.execute_query(query, domain=domain)
+        return [record["samaccountname"] for record in results]
+
+    def get_password_never_expires_users(self, domain: str) -> List[str]:
+        """Queries users that have 'pwdneverexpires' enabled in the specified domain."""
+        query = """
+        MATCH (u:User)
+        WHERE u.enabled = true
+          AND u.pwdneverexpires = true
+          AND toLower(u.domain) = toLower($domain)
+        RETURN u.samaccountname AS samaccountname
+        """
+        results = self.execute_query(query, domain=domain)
+        return [record["samaccountname"] for record in results]
+
+    def execute_custom_query(self, query: str, output: str = None):
+        """Executes a custom Cypher query provided by the user."""
+        try:
+            results = self.execute_query(query)
+            output_str = "\nCustom query results:\n" + "=" * 50 + "\n"
+            if not results:
+                output_str += "No results found for this query\n"
+            else:
+                for result in results:
+                    output_str += f"{result}\n" + "-" * 50 + "\n"
+            if output:
+                try:
+                    with open(output, "w") as f:
+                        f.write(output_str)
+                    print(f"Results saved to: {output}")
+                except Exception as e:
+                    print(f"Error writing the file: {e}")
+            else:
+                print(output_str)
+        except Exception as e:
+            print(f"Error executing query: {str(e)}")
+
+    def get_sessions(self, domain: str, da: bool = False) -> List[dict]:
+        """
+        Retrieves a list of computers with active sessions in the specified domain.
+        If 'da' is True, returns computers with sessions from domain admin users,
+        along with the domain admin username.
+        """
+        if da:
+            query = """
+            MATCH (dc:Computer)-[r1:MemberOf*0..]->(g1:Group)
+            WHERE g1.objectid =~ "S-1-5-.*-516" AND toLower(dc.domain) = toLower($domain)
+            WITH COLLECT(dc) AS exclude
+            MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})-[r2:MemberOf*1..]->(g2:Group)
+            WHERE NOT c IN exclude AND g2.objectid ENDS WITH "-544" AND toLower(c.domain) = toLower($domain)
+            RETURN DISTINCT toLower(c.name) AS computer, toLower(u.samaccountname) AS domain_admin
+            """
+        else:
+            query = """
+            MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})
+            WHERE toLower(c.domain) = toLower($domain)
+            RETURN DISTINCT toLower(c.name) AS computer
+            """
+        return self.execute_query(query, domain=domain)
+
+    # Print methods simply call the corresponding getter methods and format the output.
+    def print_aces(self, username: str, high_value: bool = False):
+        aces = self.get_critical_aces(username, high_value)
+        value_suffix = " (high-value targets only)" if high_value else ""
+        print(f"\nACLs for user: {username}{value_suffix}")
+        print("=" * 50)
+        if not aces:
+            print("No ACLs found for this user")
+            return
+        for ace in aces:
+            print(f"\nSource: {ace['source']}")
+            print(f"Source Type: {ace['sourceType']}")
+            print(f"Source Domain: {ace['sourceDomain']}")
+            print(f"Target: {ace['target']}")
+            print(f"Target Type: {ace['targetType']}")
+            print(f"Target Domain: {ace['targetDomain']}")
+            print(f"Relation: {ace['type']}")
+            print("-" * 50)
 
     def print_critical_aces_by_domain(self, domain: str, blacklist: List[str], high_value: bool = False):
         aces = self.get_critical_aces_by_domain(domain, blacklist, high_value)
@@ -405,26 +562,6 @@ class BloodHoundACEAnalyzer:
             print(f"Target Domain: {ace['targetDomain']}")
             print(f"Relation: {ace['type']}")
             print("-" * 50)
-
-    def get_computers(self, domain: str, laps: bool = None) -> List[str]:
-        with self.driver.session() as session:
-            if laps is None:
-                query = """
-                MATCH (c:Computer)
-                WHERE toLower(c.domain) = toLower($domain) AND c.enabled = true
-                RETURN toLower(c.name) AS name
-                """
-                params = {"domain": domain}
-            else:
-                query = """
-                MATCH (c:Computer)
-                WHERE toLower(c.domain) = toLower($domain)
-                  AND c.haslaps = $laps AND c.enabled = true
-                RETURN toLower(c.name) AS name
-                """
-                params = {"domain": domain, "laps": laps}
-            results = session.run(query, **params).data()
-            return [record["name"] for record in results]
 
     def print_computers(self, domain: str, output: str = None, laps: bool = None):
         computers = self.get_computers(domain, laps)
@@ -445,16 +582,6 @@ class BloodHoundACEAnalyzer:
                 for comp in computers:
                     print(comp)
 
-    def get_users(self, domain: str) -> List[str]:
-        with self.driver.session() as session:
-            query = """
-            MATCH (u:User)
-            WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            """
-            results = session.run(query, domain=domain).data()
-            return [record["samaccountname"] for record in results]
-
     def print_users(self, domain: str, output: str = None):
         users = self.get_users(domain)
         if output:
@@ -474,41 +601,7 @@ class BloodHoundACEAnalyzer:
                 for user in users:
                     print(user)
 
-    def get_password_last_change(self, domain: str, user: str = None) -> List[dict]:
-        """
-        Retrieves the pwdlastset value and the whencreated value for enabled users in the specified domain.
-        If a user is specified, only returns the record for that user.
-        """
-        with self.driver.session() as session:
-            if user:
-                query = """
-                MATCH (u:User)
-                WHERE toLower(u.domain) = toLower($domain)
-                AND toLower(u.samaccountname) = toLower($user)
-                RETURN toLower(u.samaccountname) AS user, 
-                    u.pwdlastset AS password_last_change,
-                    u.whencreated AS when_created
-                """
-                results = session.run(query, domain=domain, user=user).data()
-            else:
-                query = """
-                MATCH (u:User)
-                WHERE u.enabled = true
-                AND toLower(u.domain) = toLower($domain)
-                RETURN toLower(u.samaccountname) AS user, 
-                    u.pwdlastset AS password_last_change,
-                    u.whencreated AS when_created
-                """
-                results = session.run(query, domain=domain).data()
-            return results
-
     def print_password_last_change(self, domain: str, user: str = None, output: str = None):
-        """
-        Prints (or saves to file) the last password change value for enabled users in the specified domain.
-        If a user is specified, only that user's value is printed.
-        If pwdlastset is 0 then the whencreated value is used instead.
-        Converts the Unix timestamp to a human-readable date in UTC including the day of the week.
-        """
         data = self.get_password_last_change(domain, user)
         output_str = f"\nPassword Last Change for users in domain: {domain}\n" + "=" * 50 + "\n"
         if not data:
@@ -519,7 +612,6 @@ class BloodHoundACEAnalyzer:
                 try:
                     ts_float = float(ts)
                     if ts_float == 0:
-                        # Use whencreated as fallback if pwdlastset is 0.
                         wc = record.get('when_created')
                         dt = datetime.fromtimestamp(float(wc), tz=timezone.utc)
                         formatted_date = dt.strftime("%A, %Y-%m-%d %H:%M:%S UTC")
@@ -538,24 +630,6 @@ class BloodHoundACEAnalyzer:
                 print(f"Error writing file: {e}")
         else:
             print(output_str)
-
-    def get_admin_users(self, domain: str) -> List[str]:
-        with self.driver.session() as session:
-            query = """
-            MATCH p=(u:User)-[:MemberOf*1..]->(g:Group)
-            WHERE g.admincount = true
-              AND u.admincount = false
-              AND u.enabled = true
-              AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            UNION
-            MATCH (u:User {admincount:true})
-            WHERE u.enabled = true
-              AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            """
-            results = session.run(query, domain=domain).data()
-            return [record["samaccountname"] for record in results]
 
     def print_admin_users(self, domain: str, output: str = None):
         admin_users = self.get_admin_users(domain)
@@ -576,20 +650,6 @@ class BloodHoundACEAnalyzer:
                 for user in admin_users:
                     print(user)
 
-    def get_highvalue_users(self, domain: str) -> List[str]:
-        with self.driver.session() as session:
-            query = """
-            MATCH (u:User {highvalue: true})
-            WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            UNION
-            MATCH p=(u:User)-[:MemberOf*1..]->(g:Group {highvalue: true})-[r1]->(m)
-            WHERE u.enabled = true AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            """
-            results = session.run(query, domain=domain).data()
-            return [record["samaccountname"] for record in results]
-
     def print_highvalue_users(self, domain: str, output: str = None):
         highvalue_users = self.get_highvalue_users(domain)
         if output:
@@ -608,18 +668,6 @@ class BloodHoundACEAnalyzer:
             else:
                 for user in highvalue_users:
                     print(user)
-
-    def get_password_not_required_users(self, domain: str) -> List[str]:
-        with self.driver.session() as session:
-            query = """
-            MATCH (u:User)
-            WHERE u.enabled = true
-              AND u.passwordnotreqd = true
-              AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            """
-            results = session.run(query, domain=domain).data()
-            return [record["samaccountname"] for record in results]
 
     def print_password_not_required_users(self, domain: str, output: str = None):
         users = self.get_password_not_required_users(domain)
@@ -640,21 +688,7 @@ class BloodHoundACEAnalyzer:
                 for user in users:
                     print(user)
 
-    def get_password_never_expires_users(self, domain: str) -> List[str]:
-        """Queries users that have 'pwdneverexpires' enabled in the specified domain."""
-        with self.driver.session() as session:
-            query = """
-            MATCH (u:User)
-            WHERE u.enabled = true
-              AND u.pwdneverexpires = true
-              AND toLower(u.domain) = toLower($domain)
-            RETURN u.samaccountname AS samaccountname
-            """
-            results = session.run(query, domain=domain).data()
-            return [record["samaccountname"] for record in results]
-
     def print_password_never_expires_users(self, domain: str, output: str = None):
-        """Prints or saves to a file the list of users with 'pwdneverexpires' enabled in a domain."""
         users = self.get_password_never_expires_users(domain)
         if output:
             try:
@@ -672,86 +706,25 @@ class BloodHoundACEAnalyzer:
             else:
                 for user in users:
                     print(user)
-                    
-    def execute_custom_query(self, query: str, output: str = None):
-        """Executes a custom Cypher query provided by the user."""
-        with self.driver.session() as session:
-            try:
-                results = session.run(query).data()
-                output_str = "\nCustom query results:\n" + "=" * 50 + "\n"
-                if not results:
-                    output_str += "No results found for this query\n"
-                else:
-                    for result in results:
-                        output_str += f"{result}\n" + "-" * 50 + "\n"
-                if output:
-                    try:
-                        with open(output, "w") as f:
-                            f.write(output_str)
-                        print(f"Results saved to: {output}")
-                    except Exception as e:
-                        print(f"Error writing the file: {e}")
-                else:
-                    print(output_str)
-            except Exception as e:
-                print(f"Error executing query: {str(e)}")
-
-    def get_sessions(self, domain: str, da: bool = False) -> List[dict]:
-        """
-        Retrieves a list of computers with active sessions in the specified domain.
-        If 'da' is True, returns computers with sessions from domain admin users,
-        along with the domain admin username.
-        """
-        with self.driver.session() as session:
-            if da:
-                query = """
-                MATCH (dc:Computer)-[r1:MemberOf*0..]->(g1:Group)
-                WHERE g1.objectid =~ "S-1-5-.*-516" AND toLower(dc.domain) = toLower($domain)
-                WITH COLLECT(dc) AS exclude
-                MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})-[r2:MemberOf*1..]->(g2:Group)
-                WHERE NOT c IN exclude AND g2.objectid ENDS WITH "-544" AND toLower(c.domain) = toLower($domain)
-                RETURN DISTINCT toLower(c.name) AS computer, toLower(u.samaccountname) AS domain_admin
-                """
-            else:
-                query = """
-                MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})
-                WHERE toLower(c.domain) = toLower($domain)
-                RETURN DISTINCT toLower(c.name) AS computer
-                """
-            results = session.run(query, domain=domain).data()
-            return results
 
     def print_sessions(self, domain: str, da: bool = False, output: str = None):
-        """
-        Prints the list of computers with active sessions in the specified domain.
-        If 'da' is True, prints the computer and the domain admin that is logged in on the console.
-        If an output file is specified, only the computer names are saved to the file.
-        """
         sessions = self.get_sessions(domain, da)
         if da:
             console_output = f"\nDomain Admin Sessions in domain: {domain}\n" + "=" * 50 + "\n"
         else:
             console_output = f"\nSessions in domain: {domain}\n" + "=" * 50 + "\n"
-        
-        file_output = ""  # This will collect only the computer names for file export
-        
+        file_output = ""
         if not sessions:
             console_output += "No sessions found.\n"
             file_output += "No sessions found.\n"
         else:
             for session_record in sessions:
-                # Console output: if da flag is set, include domain admin info
                 if da:
                     console_output += f"Computer: {session_record['computer']} | Domain Admin: {session_record['domain_admin']}\n"
                 else:
                     console_output += f"{session_record['computer']}\n"
-                # File output: only save the computer name
                 file_output += f"{session_record['computer']}\n"
-        
-        # Print to console
         print(console_output)
-        
-        # If output file is specified, write file_output to that file
         if output:
             try:
                 with open(output, "w") as f:
@@ -787,6 +760,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Script to query data in BloodHound (Neo4j)"
     )
+    # Global debug parameter available for any subcommand
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode to show queries")
     subparsers = parser.add_subparsers(dest="subcommand", required=True, help="Available subcommands")
 
     # set subcommand
@@ -837,7 +812,7 @@ def main():
     parser_session.add_argument("--da", action="store_true", help="Show only sessions for domain admins")
     parser_session.add_argument("-o", "--output", help="Path to file to save results")
 
-    # access subcommand (new)
+    # access subcommand
     parser_access = subparsers.add_parser("access", help="Query access paths in BloodHound")
     parser_access.add_argument("-s", "--source", required=True, help="Source samaccountname or 'all'")
     parser_access.add_argument("-c", "--connection", required=True, choices=["AdminTo", "CanRDP", "CanPSRemote"], help="Type of connection")
@@ -871,7 +846,7 @@ def main():
     db_password = conf["db_password"]
     uri = f"bolt://{host}:{port}"
 
-    analyzer = BloodHoundACEAnalyzer(uri, db_user, db_password)
+    analyzer = BloodHoundACEAnalyzer(uri, db_user, db_password, debug=args.debug)
     try:
         if args.subcommand == "acl":
             if args.user:
