@@ -51,23 +51,35 @@ class BloodHoundACEAnalyzer:
                 print(rendered_query)
             return session.run(query, **params).data()
 
-    def get_critical_aces(self, username: str, high_value: bool = False,
-                            source_domain: str = "all", target_domain: str = "all") -> List[Dict]:
+    def get_critical_aces(self, source_domain: str, high_value: bool = False, username: str = "all",
+                            target_domain: str = "all", relation: str = "all") -> List[Dict]:
         """
         Queries ACLs for a specific user (source) with optional filtering on
         source and target domains. If high_value is True, only ACLs for high-value targets are returned.
         """
         # Build domain filters if not "all"
+        username_filter = ""
+        username_enabled = ""
+        relation_filter = "[r1]"
+        if relation.lower() != "all":
+            relation_filter = "[r1:" + relation + "]"
+        if username.lower() != "all":
+            username_filter = " toLower(n.samaccountname) = toLower($samaccountname) AND "
+        else:
+            username_enabled = " {enabled: true}"
         target_filter = ""
         if target_domain.lower() != "all":
             target_filter = " AND toLower(m.domain) = toLower($target_domain) "
 
         query = """
-        MATCH p=(n)-[r1]->(m)
-        WHERE toLower(n.samaccountname) = toLower($samaccountname)
-          AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
-          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        MATCH p=(n """ + username_enabled + """)-""" + relation_filter + """->(m)
+        WHERE """ + username_filter + """
+          r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
+          AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))
+          AND (m.enabled = true OR m.enabled is NULL)
+          """ + target_filter + """
         WITH n, m, r1,
              CASE 
                  WHEN 'User' IN labels(n) THEN 'User'
@@ -119,11 +131,14 @@ class BloodHoundACEAnalyzer:
             targetDomain: targetDomain
         } AS result
         UNION
-        MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
-        WHERE toLower(n.samaccountname) = toLower($samaccountname)
-          AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
-          """ + ("""AND m.highvalue = true""" if high_value else "") + """
+        MATCH p=(n """ + username_enabled + """)-[:MemberOf*1..]->(g:Group)-""" + relation_filter + """->(m)
+        WHERE """ + username_filter + """
+          r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
+          AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))
+          AND (m.enabled = true OR m.enabled is NULL) 
+          """ + target_filter + """
         WITH n, m, r1,
              CASE 
                  WHEN 'User' IN labels(n) THEN 'User'
@@ -178,7 +193,8 @@ class BloodHoundACEAnalyzer:
         return [r["result"] for r in self.execute_query(query,
                                                          samaccountname=username,
                                                          source_domain=source_domain,
-                                                         target_domain=target_domain)]
+                                                         target_domain=target_domain,
+                                                         relation=relation)]
 
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
         """
@@ -304,7 +320,7 @@ class BloodHoundACEAnalyzer:
             MATCH p = (n)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
-            AND (n.admincount IS NULL OR n.admincount = false)
+            AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {{highvalue:true}}))))
             AND m.enabled = true
             {rel_condition}
             WITH n, m, r,
@@ -353,7 +369,7 @@ class BloodHoundACEAnalyzer:
             MATCH p = (n)-[:MemberOf*1..]->(g:Group)-{rel_pattern}(m)
             WHERE n.enabled = true
             AND toLower(n.domain) = toLower($domain)
-            AND (n.admincount IS NULL OR n.admincount = false)
+            AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {{highvalue:true}}))))
             AND m.enabled = true
             {rel_condition}
             WITH n, m, r,
@@ -798,14 +814,16 @@ class BloodHoundACEAnalyzer:
             MATCH (dc:Computer)-[r1:MemberOf*0..]->(g1:Group)
             WHERE g1.objectid =~ "S-1-5-.*-516" AND toLower(dc.domain) = toLower($domain)
             WITH COLLECT(dc) AS exclude
-            MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})-[r2:MemberOf*1..]->(g2:Group)
-            WHERE NOT c IN exclude AND g2.objectid ENDS WITH "-544" AND toLower(c.domain) = toLower($domain)
+            MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})
+            WHERE NOT c IN exclude AND toLower(c.domain) = toLower($domain)
+            AND ((u.highvalue = true OR EXISTS((u)-[:MemberOf*1..]->(:Group {highvalue:true}))))
             RETURN DISTINCT toLower(c.name) AS computer, toLower(u.samaccountname) AS domain_admin
             """
         else:
             query = """
             MATCH (c:Computer)-[n:HasSession]->(u:User {enabled:true})
             WHERE toLower(c.domain) = toLower($domain)
+            AND ((u.highvalue = true OR EXISTS((u)-[:MemberOf*1..]->(:Group {highvalue:true}))))
             RETURN DISTINCT toLower(c.name) AS computer
             """
         return self.execute_query(query, domain=domain)
@@ -819,7 +837,7 @@ class BloodHoundACEAnalyzer:
         The relation parameter is currently not used for query modifications (only accepts "all").
         """
         high_value = (target.lower() == "high-value")
-        results = self.get_critical_aces(source, high_value, source_domain, target_domain)
+        results = self.get_critical_aces(source_domain, high_value, source, target_domain, relation)
         print(f"\nACLs for source: {source}, target: {target}, "
               f"source domain: {source_domain}, target domain: {target_domain}")
         print("=" * 50)
@@ -1064,15 +1082,15 @@ def main():
 
     # acl subcommand (refactored)
     parser_acl = subparsers.add_parser("acl", help="Query ACLs in BloodHound")
-    parser_acl.add_argument("-s", "--source", required=True, help="Source username (samaccountname)")
-    parser_acl.add_argument("-t", "--target", required=True,
+    parser_acl.add_argument("-s", "--source", default="all", help="Source samaccountname or 'all'")
+    parser_acl.add_argument("-t", "--target", default="all",
                             choices=["all", "high-value"],
                             help="Target type: 'all' for all targets, 'high-value' for high-value targets only")
-    parser_acl.add_argument("-sc", "--source-domain", help="Domain for filtering the source node")
+    parser_acl.add_argument("-sd", "--source-domain", required=True, help="Domain for filtering the source node")
     parser_acl.add_argument("-tg", "--target-domain", default="all",
                             help="Domain for filtering the target node; use 'all' to disable filtering")
-    parser_acl.add_argument("-r", "--relation", default="all", choices=["all"],
-                            help="Relation type (currently only 'all' is supported)")
+    parser_acl.add_argument("-r", "--relation", default="all", choices=["all", "DCSync", "ReadGMSAPassword", "ReadLAPSPassword"],
+                            help="Relation type (currently 'all' and 'DCSync' is supported)")
 
     # computer subcommand
     parser_computer = subparsers.add_parser("computer", help="Query computers in BloodHound")
@@ -1105,11 +1123,11 @@ def main():
 
     # access subcommand
     parser_access = subparsers.add_parser("access", help="Query access paths in BloodHound")
-    parser_access.add_argument("-s", "--source", required=True, help="Source samaccountname or 'all'")
-    parser_access.add_argument("-r", "--relation", required=True,
+    parser_access.add_argument("-s", "--source", default="all", help="Source samaccountname or 'all'")
+    parser_access.add_argument("-r", "--relation", default="all",
                            choices=["all", "AdminTo", "CanRDP", "CanPSRemote"],
                            help="Type of relation (or 'all' for any)")
-    parser_access.add_argument("-t", "--target", required=True, choices=["all", "dcs"], help="Target type")
+    parser_access.add_argument("-t", "--target", default="all", choices=["all", "dcs"], help="Target type")
     parser_access.add_argument("-d", "--domain", required=True, help="Domain for filtering nodes")
 
     args = parser.parse_args()
