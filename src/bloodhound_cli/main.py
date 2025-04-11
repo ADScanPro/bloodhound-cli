@@ -51,13 +51,23 @@ class BloodHoundACEAnalyzer:
                 print(rendered_query)
             return session.run(query, **params).data()
 
-    def get_critical_aces(self, username: str, high_value: bool = False) -> List[Dict]:
-        """Queries ACLs for a specific user."""
+    def get_critical_aces(self, username: str, high_value: bool = False,
+                            source_domain: str = "all", target_domain: str = "all") -> List[Dict]:
+        """
+        Queries ACLs for a specific user (source) with optional filtering on
+        source and target domains. If high_value is True, only ACLs for high-value targets are returned.
+        """
+        # Build domain filters if not "all"
+        target_filter = ""
+        if target_domain.lower() != "all":
+            target_filter = " AND toLower(m.domain) = toLower($target_domain) "
+
         query = """
         MATCH p=(n)-[r1]->(m)
         WHERE toLower(n.samaccountname) = toLower($samaccountname)
           AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
           """ + ("""AND m.highvalue = true""" if high_value else "") + """
+          AND toLower(n.domain) = toLower($source_domain)
         WITH n, m, r1,
              CASE 
                  WHEN 'User' IN labels(n) THEN 'User'
@@ -113,6 +123,7 @@ class BloodHoundACEAnalyzer:
         WHERE toLower(n.samaccountname) = toLower($samaccountname)
           AND r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
           """ + ("""AND m.highvalue = true""" if high_value else "") + """
+          AND toLower(n.domain) = toLower($source_domain)
         WITH n, m, r1,
              CASE 
                  WHEN 'User' IN labels(n) THEN 'User'
@@ -164,8 +175,10 @@ class BloodHoundACEAnalyzer:
             targetDomain: targetDomain
         } AS result
         """
-        results = self.execute_query(query, samaccountname=username)
-        return [r["result"] for r in results]
+        return [r["result"] for r in self.execute_query(query,
+                                                         samaccountname=username,
+                                                         source_domain=source_domain,
+                                                         target_domain=target_domain)]
 
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
         """
@@ -797,16 +810,23 @@ class BloodHoundACEAnalyzer:
             """
         return self.execute_query(query, domain=domain)
 
-    # Print methods simply call the corresponding getter methods and format the output.
-    def print_aces(self, username: str, high_value: bool = False):
-        aces = self.get_critical_aces(username, high_value)
-        value_suffix = " (high-value targets only)" if high_value else ""
-        print(f"\nACLs for user: {username}{value_suffix}")
+    def print_aces(self, source: str, relation: str, target: str,
+                   source_domain: str, target_domain: str):
+        """
+        Prints ACLs for the given source with filtering based on target type and domains.
+        The target parameter accepts "all" or "high-value". When target equals "high-value",
+        the query filters only high-value targets.
+        The relation parameter is currently not used for query modifications (only accepts "all").
+        """
+        high_value = (target.lower() == "high-value")
+        results = self.get_critical_aces(source, high_value, source_domain, target_domain)
+        print(f"\nACLs for source: {source}, target: {target}, "
+              f"source domain: {source_domain}, target domain: {target_domain}")
         print("=" * 50)
-        if not aces:
-            print("No ACLs found for this user")
+        if not results:
+            print("No ACLs found for the given parameters")
             return
-        for ace in aces:
+        for ace in results:
             print(f"\nSource: {ace['source']}")
             print(f"Source Type: {ace['sourceType']}")
             print(f"Source Domain: {ace['sourceDomain']}")
@@ -1042,13 +1062,17 @@ def main():
     parser_set.add_argument("--db-user", required=True, help="Neo4j user")
     parser_set.add_argument("--db-password", required=True, help="Neo4j password")
 
-    # acl subcommand
+    # acl subcommand (refactored)
     parser_acl = subparsers.add_parser("acl", help="Query ACLs in BloodHound")
-    group_acl = parser_acl.add_mutually_exclusive_group(required=True)
-    group_acl.add_argument("-u", "--user", help="Username (samaccountname)")
-    group_acl.add_argument("-d", "--domain", help="Domain to enumerate ACLs")
-    parser_acl.add_argument("-bd", "--blacklist-domains", nargs="*", default=[], help="Exclude these domains (space-separated)")
-    parser_acl.add_argument("--high-value", action="store_true", help="Show only ACLs to high-value targets")
+    parser_acl.add_argument("-s", "--source", required=True, help="Source username (samaccountname)")
+    parser_acl.add_argument("-t", "--target", required=True,
+                            choices=["all", "high-value"],
+                            help="Target type: 'all' for all targets, 'high-value' for high-value targets only")
+    parser_acl.add_argument("-sc", "--source-domain", help="Domain for filtering the source node")
+    parser_acl.add_argument("-tg", "--target-domain", default="all",
+                            help="Domain for filtering the target node; use 'all' to disable filtering")
+    parser_acl.add_argument("-r", "--relation", default="all", choices=["all"],
+                            help="Relation type (currently only 'all' is supported)")
 
     # computer subcommand
     parser_computer = subparsers.add_parser("computer", help="Query computers in BloodHound")
@@ -1118,10 +1142,7 @@ def main():
     analyzer = BloodHoundACEAnalyzer(uri, db_user, db_password, debug=args.debug)
     try:
         if args.subcommand == "acl":
-            if args.user:
-                analyzer.print_aces(args.user, args.high_value)
-            elif args.domain:
-                analyzer.print_critical_aces_by_domain(args.domain, args.blacklist_domains, args.high_value)
+            analyzer.print_aces(args.source, args.relation, args.target, args.source_domain, args.target_domain)
         elif args.subcommand == "computer":
             laps = None
             if args.laps is not None:
@@ -1145,7 +1166,7 @@ def main():
         elif args.subcommand == "session":
             analyzer.print_sessions(args.domain, da=args.da, output=args.output)
         elif args.subcommand == "access":
-            analyzer.print_access(args.source, args.connection, args.target, args.domain)
+            analyzer.print_access(args.source, args.relation, args.target, args.domain)
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
