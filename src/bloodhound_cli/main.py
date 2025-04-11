@@ -1073,10 +1073,6 @@ def main():
     parser_custom.add_argument("--query", required=True, help="Custom Cypher query to execute")
     parser_custom.add_argument("-o", "--output", help="Path to file to save results")
 
-    # import subcommand
-    parser_import = subparsers.add_parser("import", help="Import JSON files into BloodHound")
-    parser_import.add_argument("-f", "--file", nargs="+", required=True, help="Path(s) to JSON file(s) to import")
-
     # session subcommand
     parser_session = subparsers.add_parser("session", help="Query sessions in BloodHound")
     parser_session.add_argument("-d", "--domain", required=True, help="Domain to enumerate sessions")
@@ -1086,9 +1082,9 @@ def main():
     # access subcommand
     parser_access = subparsers.add_parser("access", help="Query access paths in BloodHound")
     parser_access.add_argument("-s", "--source", required=True, help="Source samaccountname or 'all'")
-    parser_access.add_argument("-c", "--connection", required=True,
+    parser_access.add_argument("-r", "--relation", required=True,
                            choices=["all", "AdminTo", "CanRDP", "CanPSRemote"],
-                           help="Type of connection (or 'all' for any)")
+                           help="Type of relation (or 'all' for any)")
     parser_access.add_argument("-t", "--target", required=True, choices=["all", "dcs"], help="Target type")
     parser_access.add_argument("-d", "--domain", required=True, help="Domain for filtering nodes")
 
@@ -1146,8 +1142,6 @@ def main():
                 analyzer.print_users(args.domain, args.output)
         elif args.subcommand == "custom":
             analyzer.execute_custom_query(args.query, args.output)
-        elif args.subcommand == "import":
-            analyzer.import_json_files(args.file)
         elif args.subcommand == "session":
             analyzer.print_sessions(args.domain, da=args.da, output=args.output)
         elif args.subcommand == "access":
