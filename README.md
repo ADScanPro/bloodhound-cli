@@ -2,7 +2,7 @@
 
 **bloodhound-cli** is a Python command-line tool designed to query and manage data from a **BloodHound** legacy database running on **Neo4j**. It enables you to enumerate ACLs, computers, and users (including filtering by attributes like password not required or password never expires) in an Active Directory environment ingested by BloodHound.
 
-Note that this tool only work for legacy version of bloodhound and not for the Community Edition (CE). If you're looking for SpecterOps' version of bloodhound-cli, which helps users install BloodHound Community Edition, you're in the wrong place. Please head over to: 
+>Note that this tool only work for legacy version of bloodhound and not for the Community Edition (CE). If you're looking for SpecterOps' version of bloodhound-cli, which helps users install BloodHound Community Edition, you're in the wrong place. Please head over to: 
 https://github.com/specterOps/bloodHound-cli. Thanks! 
 
 ## Key Features
