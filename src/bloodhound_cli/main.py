@@ -74,11 +74,10 @@ class BloodHoundACEAnalyzer:
         query = """
         MATCH p=(n """ + username_enabled + """)-""" + relation_filter + """->(m)
         WHERE """ + username_filter + """
-          r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          r1.isacl = true
           """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
           """ + ("""AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if username_filter.lower() == "all" else "") + """
-          AND (m.enabled = true OR m.enabled is NULL)
           """ + target_filter + """
         WITH n, m, r1,
              CASE 
@@ -128,16 +127,16 @@ class BloodHoundACEAnalyzer:
             targetType: targetType,
             type: type(r1),
             sourceDomain: sourceDomain,
-            targetDomain: targetDomain
+            targetDomain: targetDomain,
+            targetEnabled: m.enabled
         } AS result
         UNION
         MATCH p=(n """ + username_enabled + """)-[:MemberOf*1..]->(g:Group)-""" + relation_filter + """->(m)
         WHERE """ + username_filter + """
-          r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
+          r1.isacl = true
           """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
           """ + ("""AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if username_filter.lower() == "all" else "") + """
-          AND (m.enabled = true OR m.enabled is NULL) 
           """ + target_filter + """
         WITH n, m, r1,
              CASE 
@@ -187,7 +186,8 @@ class BloodHoundACEAnalyzer:
             targetType: targetType,
             type: type(r1),
             sourceDomain: sourceDomain,
-            targetDomain: targetDomain
+            targetDomain: targetDomain,
+            targetEnabled: m.enabled
         } AS result
         """
         return [r["result"] for r in self.execute_query(query,
@@ -610,7 +610,8 @@ class BloodHoundACEAnalyzer:
             targetType: targetType,
             type: type(r1),
             sourceDomain: sourceDomain,
-            targetDomain: targetDomain
+            targetDomain: targetDomain,
+            targetEnabled: m.enabled
         } AS result
         UNION
         MATCH p=(n)-[:MemberOf*1..]->(g:Group)-[r1]->(m)
@@ -667,7 +668,8 @@ class BloodHoundACEAnalyzer:
             targetType: targetType,
             type: type(r1),
             sourceDomain: sourceDomain,
-            targetDomain: targetDomain
+            targetDomain: targetDomain,
+            targetEnabled: m.enabled
         } AS result
         """
         results = self.execute_query(query, domain=domain.upper(), blacklist=[d.upper() for d in blacklist])
@@ -851,6 +853,8 @@ class BloodHoundACEAnalyzer:
             print(f"Target: {ace['target']}")
             print(f"Target Type: {ace['targetType']}")
             print(f"Target Domain: {ace['targetDomain']}")
+            if 'targetEnabled' in ace and ace['targetEnabled']==False:
+                print(f"Target Enabled: {ace['targetEnabled']}")
             print(f"Relation: {ace['type']}")
             print("-" * 50)
 
@@ -869,6 +873,8 @@ class BloodHoundACEAnalyzer:
             print(f"Target: {ace['target']}")
             print(f"Target Type: {ace['targetType']}")
             print(f"Target Domain: {ace['targetDomain']}")
+            if 'targetEnabled' in ace and ace['targetEnabled']==False:
+                print(f"Target Enabled: {ace['targetEnabled']}")
             print(f"Relation: {ace['type']}")
             print("-" * 50)
 
