@@ -77,7 +77,7 @@ class BloodHoundACEAnalyzer:
           r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
           """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
-          AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))
+          """ + ("""AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if username_filter.lower() == "all" else "") + """
           AND (m.enabled = true OR m.enabled is NULL)
           """ + target_filter + """
         WITH n, m, r1,
@@ -136,7 +136,7 @@ class BloodHoundACEAnalyzer:
           r1.isacl = true AND (m.enabled = true OR m.enabled is NULL)
           """ + ("""AND ((m.highvalue = true OR EXISTS((m)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if high_value else "") + """
           AND toLower(n.domain) = toLower($source_domain)
-          AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))
+          """ + ("""AND NOT ((n.highvalue = true OR EXISTS((n)-[:MemberOf*1..]->(:Group {highvalue:true}))))""" if username_filter.lower() == "all" else "") + """
           AND (m.enabled = true OR m.enabled is NULL) 
           """ + target_filter + """
         WITH n, m, r1,
