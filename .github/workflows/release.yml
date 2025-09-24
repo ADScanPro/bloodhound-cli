@@ -1,7 +1,7 @@
 on:
   push:
-    tags:
-      - 'v*'   # <--- Se activa cuando se hace push de un tag que empiece por 'v'
+    branches:
+      - main
 
 jobs:
   release:
@@ -27,4 +27,3 @@ jobs:
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
-          
