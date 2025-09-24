@@ -4,12 +4,13 @@ import stat
 import configparser
 from neo4j import GraphDatabase
 import argparse
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
 import re
 import requests
 import getpass
 from pathlib import Path
+import time
 
 try:
     from rich.console import Console
@@ -1225,6 +1226,109 @@ class BloodHoundCEClient:
 
         return results
 
+    def _get_file_upload_job(self, job_id: int, list_path: str = "/api/v2/file-upload") -> Optional[Dict]:
+        """Fetch a single file-upload job by id using the list endpoint.
+
+        The OpenAPI defines only a list endpoint with filter params. Some deployments
+        may not support filtering by id directly, so we attempt with a query param and
+        fall back to client-side filtering.
+        """
+        url = f"{self.base_url}{list_path}"
+        try:
+            # First, try server-side filtering
+            resp = self.session.get(url, params={"id": job_id}, verify=self.verify, timeout=60)
+            if resp.status_code >= 400:
+                # Retry without filter and do client-side filtering
+                resp = self.session.get(url, verify=self.verify, timeout=60)
+            data = resp.json() if resp.headers.get("Content-Type", "").startswith("application/json") else {}
+            items = []
+            if isinstance(data, dict):
+                items = data.get("data") or data.get("items") or []
+            # items is expected to be a list of jobs
+            for item in items:
+                try:
+                    if int(item.get("id")) == int(job_id):
+                        return item
+                except Exception:
+                    continue
+        except requests.RequestException:
+            return None
+        except ValueError:
+            return None
+        return None
+
+    def upload_files_and_wait(self, file_paths: List[str], start_path: str = "/api/v2/file-upload/start", upload_path_tpl: str = "/api/v2/file-upload/{job_id}", end_path_tpl: str = "/api/v2/file-upload/{job_id}/end", content_type: Optional[str] = None, tag: Optional[str] = None, poll_interval: int = 5, timeout_seconds: int = 1800, list_path: str = "/api/v2/file-upload") -> Tuple[Dict[str, str], Optional[Dict]]:
+        """Upload files and wait until the job has finished processing in BloodHound.
+
+        Returns a tuple: (per-file results mapping, final job dict or None on timeout/error).
+        """
+        results = self.upload_files(
+            file_paths=file_paths,
+            start_path=start_path,
+            upload_path_tpl=upload_path_tpl,
+            end_path_tpl=end_path_tpl,
+            content_type=content_type,
+            tag=tag,
+        )
+
+        # If any upload failed outright, we still proceed to try to get job id from the start response
+        # However, current implementation does not expose job id externally. Re-start minimally to obtain it
+        # by inferring from latest job in the list. This is a best-effort strategy.
+
+        # Attempt to find the most recent job and poll it if it looks like ours.
+        start_time = time.time()
+        last_status = None
+        job = None
+        spinner_shown = False
+        while True:
+            job = self._get_file_upload_job(job_id=self._infer_latest_file_upload_job_id(list_path=list_path))
+            if job is None:
+                # Brief grace period immediately after upload
+                if time.time() - start_time > 15:
+                    break
+            else:
+                status = job.get("status")
+                status_message = job.get("status_message")
+                if _RICH_AVAILABLE:
+                    if not spinner_shown:
+                        console.rule("[bold cyan]Waiting for ingestion to complete")
+                        spinner_shown = True
+                    console.log({"status": status, "message": status_message})
+                else:
+                    print(f"Job status: {status} - {status_message}")
+
+                # Terminal statuses: -1 invalid, 2 complete, 3 canceled, 4 timed out, 5 failed, 8 partially complete
+                if status in [-1, 2, 3, 4, 5, 8]:
+                    break
+            if time.time() - start_time > timeout_seconds:
+                break
+            time.sleep(max(1, poll_interval))
+
+        return results, job
+
+    def _infer_latest_file_upload_job_id(self, list_path: str = "/api/v2/file-upload") -> Optional[int]:
+        """Best-effort helper to get the latest file upload job id for current user.
+
+        The API returns paginated list with sort options, but for simplicity we fetch and
+        take the max id as the latest.
+        """
+        url = f"{self.base_url}{list_path}"
+        try:
+            resp = self.session.get(url, verify=self.verify, timeout=60)
+            data = resp.json() if resp.headers.get("Content-Type", "").startswith("application/json") else {}
+            items = []
+            if isinstance(data, dict):
+                items = data.get("data") or data.get("items") or []
+            ids = []
+            for item in items:
+                try:
+                    ids.append(int(item.get("id")))
+                except Exception:
+                    continue
+            return max(ids) if ids else None
+        except Exception:
+            return None
+
     def not_implemented(self, feature: str):
         msg = (
             f"Feature '{feature}' is not yet implemented for BloodHound CE in this CLI. "
@@ -1370,6 +1474,12 @@ def main():
     parser_upload.add_argument("--content-type", help="Force Content-Type (auto-detected from extension if omitted)")
     parser_upload.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
     parser_upload.add_argument("--tag", help="Optional tag/label to include with upload (reserved)")
+    wait_group = parser_upload.add_mutually_exclusive_group()
+    wait_group.add_argument("--wait", dest="wait", action="store_true", help="Wait for ingestion to complete (default)")
+    wait_group.add_argument("--no-wait", dest="wait", action="store_false", help="Return immediately after upload is accepted")
+    parser_upload.set_defaults(wait=True)
+    parser_upload.add_argument("--poll-interval", type=int, default=5, help="Seconds between status checks (default: 5)")
+    parser_upload.add_argument("--timeout", type=int, default=1800, help="Max seconds to wait for completion (default: 1800)")
 
     # acl subcommand (refactored)
     parser_acl = subparsers.add_parser("acl", help="Query ACLs in BloodHound")
@@ -1515,17 +1625,52 @@ def main():
                 if not token_present:
                     print("No CE API token found. Run 'bloodhound-cli --edition ce auth --url http://localhost:7474 --username <user>' first.")
                 else:
-                    results = analyzer.upload_files(
-                        args.files,
-                        start_path=args.start_path,
-                        upload_path_tpl=args.upload_path,
-                        end_path_tpl=args.end_path,
-                        content_type=args.content_type,
-                        tag=args.tag,
-                    )
-                    print("\nUpload results\n" + "=" * 50)
-                    for f, msg in results.items():
-                        print(f"{f}: {msg}")
+                    if args.wait:
+                        results, job = analyzer.upload_files_and_wait(
+                            args.files,
+                            start_path=args.start_path,
+                            upload_path_tpl=args.upload_path,
+                            end_path_tpl=args.end_path,
+                            content_type=args.content_type,
+                            tag=args.tag,
+                            poll_interval=args.poll_interval,
+                            timeout_seconds=args.timeout,
+                        )
+                        print("\nUpload results\n" + "=" * 50)
+                        for f, msg in results.items():
+                            print(f"{f}: {msg}")
+                        # Human-readable status mapping
+                        status_map = {
+                            -1: "Invalid",
+                            0: "Ready",
+                            1: "Running",
+                            2: "Complete",
+                            3: "Canceled",
+                            4: "Timed Out",
+                            5: "Failed",
+                            6: "Ingesting",
+                            7: "Analyzing",
+                            8: "Partially Complete",
+                        }
+                        if job:
+                            st = job.get("status")
+                            st_readable = status_map.get(st, str(st))
+                            msg = job.get("status_message")
+                            print("\nIngestion job status: {}{}".format(st_readable, f" - {msg}" if msg else ""))
+                        else:
+                            print("\nIngestion job status: Unknown (timeout or not found)")
+                    else:
+                        results = analyzer.upload_files(
+                            args.files,
+                            start_path=args.start_path,
+                            upload_path_tpl=args.upload_path,
+                            end_path_tpl=args.end_path,
+                            content_type=args.content_type,
+                            tag=args.tag,
+                        )
+                        print("\nUpload results\n" + "=" * 50)
+                        for f, msg in results.items():
+                            print(f"{f}: {msg}")
         elif args.subcommand == "user":
             if args.password_last_change:
                 analyzer.print_password_last_change(args.domain, user=args.user, output=args.output)
