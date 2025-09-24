@@ -1,9 +1,11 @@
 # bloodhound-cli
 
-**bloodhound-cli** is a Python command-line tool designed to query and manage data from a **BloodHound** legacy database running on **Neo4j**. It enables you to enumerate ACLs, computers, and users (including filtering by attributes like password not required or password never expires) in an Active Directory environment ingested by BloodHound.
+**bloodhound-cli** is a Python command-line tool designed to query and manage data from **BloodHound**.
 
->Note that this tool only work for legacy version of bloodhound and not for the Community Edition (CE). If you're looking for SpecterOps' version of bloodhound-cli, which helps users install BloodHound Community Edition, you're in the wrong place. Please head over to: 
-https://github.com/specterOps/bloodHound-cli. Thanks! 
+- Legacy (Neo4j-backed) is fully supported.
+- Community Edition (CE) is introduced with a pluggable client skeleton so behavior can be incrementally implemented without breaking legacy users.
+
+>CE support note: This CLI now includes an early CE client. Many CE features are placeholders. If you need the official SpecterOps CE installer CLI, see their project at `https://github.com/specterOps/bloodHound-cli`.
 
 ## Key Features
 
@@ -30,7 +32,15 @@ https://github.com/specterOps/bloodHound-cli. Thanks!
         - `--high-value`: Show only high-value users.
         - `--password-not-required`: Show only users with `passwordnotreqd` enabled.
         - `--password-never-expires`: Show only users with `pwdneverexpires` enabled.
-6. **Secure Credential Storage**
+5. **Session and Access Queries**
+
+    - Query sessions and access path relations in a domain (legacy).
+
+6. **Debug and Verbose Output**
+
+    - Global flags `--debug` and `--verbose` enhance output. When available, output is formatted with `rich`.
+
+7. **Secure Credential Storage**
 
     - The `set` subcommand saves your Neo4j credentials in a local file (`~/.bloodhound_config`) which is excluded from source control and has strict file permissions.
 
@@ -50,86 +60,142 @@ pip install bloodhound-cli
 
 ## Usage
 
-1. **Set Neo4j Configuration**  
-    Before using any other subcommand, run:
-    
+1. **Set Neo4j (Legacy) Configuration**  
+
     ```sh
     bloodhound-cli set --host <neo4j_host> --port <neo4j_port> --db-user <neo4j_user> --db-password <neo4j_password>
     ```
-    
-    This will create/update a configuration file at `~/.bloodhound_config`.
-    
-2. **Enumerate ACLs**
-    
+
+2. **Set CE Configuration (optional, early support)**
+
+    (Removed) Use the auth subcommand passing --base-url and credentials instead.
+
+3. **Authenticate to CE (generate and store token)**
+
+    ```sh
+    bloodhound-cli --edition ce auth --url http://localhost:7474 --username <user>
+    # It will prompt for the password securely
+    # Optional flags:
+    #   --password <pass>
+    #   --login-path /api/v2/login
+    #   --insecure
+    ```
+
+4. **Run in a chosen edition**
+
+    - The default edition can be persisted in `~/.bloodhound_config` under `[GENERAL] edition`.
+      Running `set` will store `legacy`; running `auth` will store `ce`.
+
+    - To target CE explicitly:
+
+    ```sh
+    bloodhound-cli --edition ce user --domain mydomain.local
+    ```
+
+    - Or via env var:
+
+    ```sh
+    BLOODHOUND_EDITION=ce bloodhound-cli user --domain mydomain.local
+    ```
+
+5. **Upload collector artifacts to CE (v2 file-upload flow)**
+
+    ```sh
+    bloodhound-cli --edition ce upload \
+      -f data1.zip data2.json \
+      --start-path /api/v2/file-upload/start \
+      --upload-path /api/v2/file-upload/{job_id} \
+      --end-path /api/v2/file-upload/{job_id}/end
+    # Optional flags:
+    #   --content-type application/zip|application/json (auto-detected if omitted)
+    #   --insecure
+    ```
+
+6. **Enumerate ACLs**
+
     - **For a single user:**
-        
+
         ```sh
         bloodhound-cli acl --user myuser
         ```
-        
+
     - **For cross-domain:**
-        
+
         ```sh
         bloodhound-cli acl --domain mydomain.local
         ```
-        
+
     - **Exclude multiple domains:**
-        
+
         ```sh
         bloodhound-cli acl --domain mydomain.local -bd EXCLUDED1 EXCLUDED2
         ```
-        
-3. **Enumerate Computers**
-    
+
+7. **Enumerate Computers**
+
     - **All computers in a domain:**
-        
+
         ```sh
         bloodhound-cli computer --domain mydomain.local
         ```
-        
+
     - **Filter by LAPS and save results:**
-        
+
         ```sh
         bloodhound-cli computer --domain mydomain.local --laps True -o computers_with_laps.txt
         ```
-        
-4. **Enumerate Users**
-    
+
+8. **Enumerate Users**
+
     - **List all users in a domain:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local
         ```
-        
+
     - **List privileged (admin) users:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local --admin-count
         ```
-        
+
     - **List high-value users:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local --high-value
         ```
-        
+
     - **List users with password not required:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local --password-not-required
         ```
-        
+
     - **List users with password never expires:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local --password-never-expires
         ```
-        
+
     - **Save user query results:**
-        
+
         ```sh
         bloodhound-cli user --domain mydomain.local --admin-count -o admin_users.txt
         ```
+
+## Edition Support Details
+
+- `--edition legacy` (default): full feature set (Neo4j backend).
+- `--edition ce`: CE client with support for `auth` (/api/v2/login) y `upload` (flow de file-upload v2). El resto de comandos imprimirán un mensaje hasta estar conectados a CE.
+
+## Changelog
+
+- 0.2.0
+  - Add `--edition` and `--verbose` global flags
+  - Add CE configuration `set-ce` and CE client skeleton
+  - Add CE `auth` (JWT via `/api/v2/login`) and `upload` (file-upload `/start`, `/{job_id}`, `/{job_id}/end`)
+  - Integrate `rich` for debug/verbose output
+  - Dependencies: add `requests`, `rich`
 
 ## License
 

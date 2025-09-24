@@ -4,17 +4,30 @@ import stat
 import configparser
 from neo4j import GraphDatabase
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime, timezone
 import re
+import requests
+import getpass
+from pathlib import Path
+
+try:
+    from rich.console import Console
+    from rich import print as rprint
+    _RICH_AVAILABLE = True
+    console = Console()
+except Exception:  # pragma: no cover - graceful fallback if rich is unavailable
+    _RICH_AVAILABLE = False
+    console = None
 
 CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
 class BloodHoundACEAnalyzer:
-    def __init__(self, uri: str, user: str, password: str, debug: bool = False):
+    def __init__(self, uri: str, user: str, password: str, debug: bool = False, verbose: bool = False):
         """Initializes the connection with Neo4j."""
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
         self.debug = debug
+        self.verbose = verbose
 
     def close(self):
         """Closes the connection with Neo4j."""
@@ -43,12 +56,20 @@ class BloodHoundACEAnalyzer:
         """
         with self.driver.session() as session:
             if self.debug:
-                print("DEBUG: Executing query:")
-                print(query.strip())
-                print("DEBUG: With parameters:", params)
-                rendered_query = self.render_query(query, params)
-                print("DEBUG: Fully rendered query:")
-                print(rendered_query)
+                if _RICH_AVAILABLE:
+                    console.rule("[bold yellow]DEBUG: Executing query")
+                    console.print(query.strip())
+                    console.print({"parameters": params})
+                    rendered_query = self.render_query(query, params)
+                    console.rule("[bold yellow]DEBUG: Fully rendered query")
+                    console.print(rendered_query)
+                else:
+                    print("DEBUG: Executing query:")
+                    print(query.strip())
+                    print("DEBUG: With parameters:", params)
+                    rendered_query = self.render_query(query, params)
+                    print("DEBUG: Fully rendered query:")
+                    print(rendered_query)
             return session.run(query, **params).data()
 
     def get_critical_aces(self, source_domain: str, high_value: bool = False, username: str = "all",
@@ -1048,9 +1069,216 @@ class BloodHoundACEAnalyzer:
             except Exception as e:
                 print(f"Error writing the file: {e}")
 
+
+class BloodHoundCEClient:
+    """Client for BloodHound Community Edition (CE).
+
+    NOTE: CE uses a different backend/API than legacy Neo4j. This skeleton provides
+    a pluggable interface so commands can be implemented incrementally without
+    impacting legacy users.
+    """
+
+    def __init__(self, base_url: str, api_token: Optional[str] = None, debug: bool = False, verbose: bool = False, verify: bool = True):
+        self.base_url = base_url.rstrip("/")
+        self.api_token = api_token
+        self.debug = debug
+        self.verbose = verbose
+        self.session = requests.Session()
+        self.verify = verify
+        if api_token:
+            self.session.headers.update({"Authorization": f"Bearer {api_token}"})
+
+    def close(self):
+        try:
+            self.session.close()
+        except Exception:
+            pass
+
+    def _log(self, message: str):
+        if self.debug and _RICH_AVAILABLE:
+            console.log(message)
+        elif self.debug:
+            print(message)
+
+    def authenticate(self, username: str, password: str, login_path: str = "/api/v2/login") -> Optional[str]:
+        """Authenticate against CE and return token. Update session headers if successful.
+
+        The default path is a conservative guess; override with --login-path if your CE differs.
+        """
+        url = f"{self.base_url}{login_path}"
+        self._log(f"POST {url}")
+        try:
+            # According to OpenAPI v2, body requires login_method+username and secret or otp
+            payload = {"login_method": "secret", "username": username, "secret": password}
+            if self.debug:
+                redacted = dict(payload)
+                redacted["secret"] = "***"
+                self._log({"request": {"url": url, "json": redacted}})
+            response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+            if self.debug:
+                try:
+                    self._log({"response": {"status": response.status_code, "body": response.json()}})
+                except ValueError:
+                    self._log({"response": {"status": response.status_code, "body": response.text[:500]}})
+            if response.status_code >= 400:
+                print(f"Authentication failed: HTTP {response.status_code} {response.text}")
+                if "Neo.ClientError" in response.text or "No authentication header supplied" in response.text:
+                    print("Hint: Parece que estás apuntando al puerto de Neo4j (p.ej., :7474). Usa la URL de la API de BloodHound CE, p.ej., http://localhost:8080")
+                return None
+            data = response.json()
+            # OpenAPI example nests token under data.session_token
+            token = None
+            if isinstance(data, dict):
+                data_field = data.get("data")
+                if isinstance(data_field, dict):
+                    token = data_field.get("session_token")
+            # Fallbacks
+            if not token:
+                token = data.get("token") or data.get("access_token") or data.get("jwt")
+            if not token:
+                print("Authentication response did not contain a token field.")
+                return None
+            self.api_token = token
+            self.session.headers.update({"Authorization": f"Bearer {token}"})
+            return token
+        except requests.RequestException as exc:
+            print(f"Authentication error: {exc}")
+            return None
+
+    def upload_files(self, file_paths: List[str], start_path: str = "/api/v2/file-upload/start", upload_path_tpl: str = "/api/v2/file-upload/{job_id}", end_path_tpl: str = "/api/v2/file-upload/{job_id}/end", content_type: Optional[str] = None, tag: Optional[str] = None) -> Dict[str, str]:
+        """Upload collector artifacts using v2 file-upload job flow.
+
+        1) POST start_path -> returns job with id
+        2) For each file: POST upload_path_tpl (set Content-Type header appropriately) with raw body
+        3) POST end_path_tpl
+        """
+        results: Dict[str, str] = {}
+        # Step 1: start job
+        start_url = f"{self.base_url}{start_path}"
+        self._log(f"POST {start_url}")
+        try:
+            start_resp = self.session.post(start_url, verify=self.verify, timeout=60)
+            if start_resp.status_code >= 400:
+                msg = f"Failed to start upload job: HTTP {start_resp.status_code} {start_resp.text[:200]}"
+                for p in file_paths:
+                    results[p] = msg
+                return results
+            start_data = start_resp.json()
+            job = start_data.get("data") if isinstance(start_data, dict) else None
+            job_id = job.get("id") if isinstance(job, dict) else None
+            if job_id is None:
+                msg = "Upload job response missing id"
+                for p in file_paths:
+                    results[p] = msg
+                return results
+        except requests.RequestException as exc:
+            msg = f"Failed to start upload job: {exc}"
+            for p in file_paths:
+                results[p] = msg
+            return results
+
+        # Step 2: upload files
+        for p in file_paths:
+            fpath = Path(p)
+            if not fpath.exists() or not fpath.is_file():
+                results[p] = "File not found"
+                continue
+            upload_url = f"{self.base_url}{upload_path_tpl.replace('{job_id}', str(job_id))}"
+            headers = {}
+            # Determine content type
+            ctype = content_type
+            if not ctype:
+                suffix = fpath.suffix.lower()
+                if suffix == ".zip":
+                    ctype = "application/zip"
+                elif suffix == ".json":
+                    ctype = "application/json"
+                else:
+                    ctype = "application/octet-stream"
+            headers["Content-Type"] = ctype
+            try:
+                with open(fpath, "rb") as fh:
+                    self._log(f"POST {upload_url} ({fpath.name})")
+                    body = fh.read()
+                # If tag is provided and server expects metadata separately, this simple flow may not attach it.
+                # Kept minimal per spec (raw body). If server requires multipart, this should be adjusted.
+                resp = self.session.post(upload_url, data=body, headers=headers, verify=self.verify, timeout=None)
+                if resp.status_code >= 400:
+                    results[p] = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                else:
+                    results[p] = "Accepted"
+            except requests.RequestException as exc:
+                results[p] = f"Upload error: {exc}"
+
+        # Step 3: end job
+        end_url = f"{self.base_url}{end_path_tpl.replace('{job_id}', str(job_id))}"
+        try:
+            self._log(f"POST {end_url}")
+            end_resp = self.session.post(end_url, verify=self.verify, timeout=60)
+            if end_resp.status_code >= 400:
+                # annotate all results with end error
+                for k in list(results.keys()):
+                    results[k] = results[k] + f"; finalize error HTTP {end_resp.status_code}"
+        except requests.RequestException as exc:
+            for k in list(results.keys()):
+                results[k] = results[k] + f"; finalize error {exc}"
+
+        return results
+
+    def not_implemented(self, feature: str):
+        msg = (
+            f"Feature '{feature}' is not yet implemented for BloodHound CE in this CLI. "
+            f"Please use the 'custom' subcommand if CE exposes an HTTP API endpoint, "
+            f"or run with --edition legacy for Neo4j-backed instances."
+        )
+        print(msg)
+
+    def print_aces(self, *args, **kwargs):  # placeholder to keep interface symmetry
+        self.not_implemented("acl")
+
+    def print_computers(self, *args, **kwargs):
+        self.not_implemented("computer")
+
+    def print_users(self, *args, **kwargs):
+        self.not_implemented("user")
+
+    def print_password_last_change(self, *args, **kwargs):
+        self.not_implemented("user --password-last-change")
+
+    def print_admin_users(self, *args, **kwargs):
+        self.not_implemented("user --admin-count")
+
+    def print_highvalue_users(self, *args, **kwargs):
+        self.not_implemented("user --high-value")
+
+    def print_password_not_required_users(self, *args, **kwargs):
+        self.not_implemented("user --password-not-required")
+
+    def print_password_never_expires_users(self, *args, **kwargs):
+        self.not_implemented("user --password-never-expires")
+
+    def print_sessions(self, *args, **kwargs):
+        self.not_implemented("session")
+
+    def print_access(self, *args, **kwargs):
+        self.not_implemented("access")
+
+    def execute_custom_query(self, query: str, output: str = None):
+        """Execute a custom CE HTTP request.
+
+        This is a placeholder implementation. Adjust to CE's actual API endpoint.
+        """
+        self.not_implemented("custom")
+
 def save_config(host: str, port: str, db_user: str, db_password: str):
     """Saves the Neo4j connection configuration to a file in the user's directory."""
     config = configparser.ConfigParser()
+    # Preserve existing config if present
+    if os.path.exists(CONFIG_PATH):
+        config.read(CONFIG_PATH)
+    # Persist selected edition
+    config["GENERAL"] = config.get("GENERAL", {}) if "GENERAL" in config else {}
+    config["GENERAL"]["edition"] = "legacy"
     config["NEO4J"] = {
         "host": host,
         "port": port,
@@ -1062,6 +1290,24 @@ def save_config(host: str, port: str, db_user: str, db_password: str):
     os.chmod(CONFIG_PATH, stat.S_IRUSR | stat.S_IWUSR)
     print(f"Configuration saved at {CONFIG_PATH}")
 
+
+def save_ce_config(base_url: str, api_token: Optional[str]):
+    """Saves the CE connection configuration to the same config file under a CE section."""
+    config = configparser.ConfigParser()
+    if os.path.exists(CONFIG_PATH):
+        config.read(CONFIG_PATH)
+    config["CE"] = {
+        "base_url": base_url,
+        "api_token": api_token or ""
+    }
+    # Persist selected edition
+    config["GENERAL"] = config.get("GENERAL", {}) if "GENERAL" in config else {}
+    config["GENERAL"]["edition"] = "ce"
+    with open(CONFIG_PATH, "w") as configfile:
+        config.write(configfile)
+    os.chmod(CONFIG_PATH, stat.S_IRUSR | stat.S_IWUSR)
+    print(f"CE configuration saved at {CONFIG_PATH}")
+
 def load_config():
     """Loads the configuration from the file, if it exists."""
     config = configparser.ConfigParser()
@@ -1071,20 +1317,59 @@ def load_config():
     else:
         return None
 
+
+def load_ce_config() -> Optional[configparser.SectionProxy]:
+    """Loads CE configuration if it exists."""
+    config = configparser.ConfigParser()
+    if os.path.exists(CONFIG_PATH):
+        config.read(CONFIG_PATH)
+        if "CE" in config:
+            return config["CE"]
+    return None
+
+def load_default_edition() -> str:
+    """Loads default edition from config if set, else returns 'legacy'."""
+    config = configparser.ConfigParser()
+    if os.path.exists(CONFIG_PATH):
+        config.read(CONFIG_PATH)
+        if "GENERAL" in config and config["GENERAL"].get("edition"):
+            return config["GENERAL"].get("edition", "legacy")
+    return "legacy"
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Script to query data in BloodHound (Neo4j)"
+        description="CLI to query BloodHound data (Legacy Neo4j and CE skeleton)"
     )
-    # Global debug parameter available for any subcommand
+    # Global debug/verbose parameters available for any subcommand
     parser.add_argument("--debug", action="store_true", help="Enable debug mode to show queries")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("--edition", choices=["legacy", "ce"], help="Select BloodHound edition. Defaults to legacy.")
     subparsers = parser.add_subparsers(dest="subcommand", required=True, help="Available subcommands")
 
     # set subcommand
-    parser_set = subparsers.add_parser("set", help="Saves the connection configuration for Neo4j")
+    parser_set = subparsers.add_parser("set", help="Saves the connection configuration for Neo4j (legacy)")
     parser_set.add_argument("--host", required=True, help="Neo4j host")
     parser_set.add_argument("--port", required=True, help="Neo4j port")
     parser_set.add_argument("--db-user", required=True, help="Neo4j user")
     parser_set.add_argument("--db-password", required=True, help="Neo4j password")
+
+    # CE auth subcommand
+    parser_auth = subparsers.add_parser("auth", help="Authenticate to BloodHound CE and save API token")
+    parser_auth.add_argument("-u", "--url", default="http://localhost:8080", help="BloodHound CE base URL (default: http://localhost:8080)")
+    parser_auth.add_argument("--username", default="admin", help="CE username (default: admin)")
+    parser_auth.add_argument("--password", help="CE password (if omitted, prompt securely)")
+    parser_auth.add_argument("--login-path", default="/api/v2/login", help="Login path (default: /api/v2/login)")
+    parser_auth.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
+
+    # CE upload subcommand
+    parser_upload = subparsers.add_parser("upload", help="Upload collector artifacts to BloodHound CE (v2 file-upload flow)")
+    parser_upload.add_argument("-f", "--file", dest="files", required=True, nargs="+", help="Path(s) to .zip/.json files")
+    parser_upload.add_argument("--start-path", default="/api/v2/file-upload/start", help="Start path (default: /api/v2/file-upload/start)")
+    parser_upload.add_argument("--upload-path", default="/api/v2/file-upload/{job_id}", help="Upload path template (default: /api/v2/file-upload/{job_id})")
+    parser_upload.add_argument("--end-path", default="/api/v2/file-upload/{job_id}/end", help="End path template (default: /api/v2/file-upload/{job_id}/end)")
+    parser_upload.add_argument("--content-type", help="Force Content-Type (auto-detected from extension if omitted)")
+    parser_upload.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
+    parser_upload.add_argument("--tag", help="Optional tag/label to include with upload (reserved)")
 
     # acl subcommand (refactored)
     parser_acl = subparsers.add_parser("acl", help="Query ACLs in BloodHound")
@@ -1142,28 +1427,67 @@ def main():
         save_config(args.host, args.port, args.db_user, args.db_password)
         return
 
-    if args.subcommand != "set" and not os.path.exists(CONFIG_PATH):
+    if args.subcommand not in ("set", "auth") and not os.path.exists(CONFIG_PATH):
         print("Error: Configuration file not found.")
         print("Please run the 'set' subcommand to set the connection variables, for example:")
-        print("  bloodhound-cli.py set --host localhost --port 7687 --db-user neo4j --db-password Bl00dh0und")
+        print("  bloodhound-cli set --host localhost --port 7687 --db-user neo4j --db-password Bl00dh0und")
         exit(1)
 
-    conf = load_config()
-    if conf is None:
-        print("Error: No connection configuration found. Please run 'bloodhound-cli.py set ...'")
-        exit(1)
-    for key in ["host", "port", "db_user", "db_password"]:
-        if key not in conf:
-            print(f"Error: The key '{key}' was not found in the configuration. Please run 'bloodhound-cli.py set ...'")
+    # Default edition resolution order:
+    # 1) CLI flag --edition
+    # 2) env BLOODHOUND_EDITION
+    # 3) if subcommand == auth -> ce
+    # 4) persisted config GENERAL.edition
+    # 5) legacy
+    env_edition = os.getenv("BLOODHOUND_EDITION")
+    persisted = load_default_edition()
+    if args.edition:
+        selected_edition = args.edition
+    elif env_edition:
+        selected_edition = env_edition
+    elif args.subcommand == "auth":
+        selected_edition = "ce"
+    elif persisted:
+        selected_edition = persisted
+    else:
+        selected_edition = "legacy"
+
+    analyzer = None
+    if selected_edition == "legacy":
+        conf = load_config()
+        if conf is None:
+            print("Error: No connection configuration found. Please run 'bloodhound-cli set ...'")
             exit(1)
+        for key in ["host", "port", "db_user", "db_password"]:
+            if key not in conf:
+                print(f"Error: The key '{key}' was not found in the configuration. Please run 'bloodhound-cli set ...'")
+                exit(1)
 
-    host = conf["host"]
-    port = conf["port"]
-    db_user = conf["db_user"]
-    db_password = conf["db_password"]
-    uri = f"bolt://{host}:{port}"
-
-    analyzer = BloodHoundACEAnalyzer(uri, db_user, db_password, debug=args.debug)
+        host = conf["host"]
+        port = conf["port"]
+        db_user = conf["db_user"]
+        db_password = conf["db_password"]
+        uri = f"bolt://{host}:{port}"
+        analyzer = BloodHoundACEAnalyzer(uri, db_user, db_password, debug=args.debug, verbose=args.verbose)
+    else:
+        # Determine TLS verify per subcommand flags if present
+        verify = True
+        if hasattr(args, "insecure") and args.insecure:
+            verify = False
+        if args.subcommand == "auth":
+            analyzer = BloodHoundCEClient(base_url=args.url, api_token=None, debug=args.debug, verbose=args.verbose, verify=verify)
+            base_url = args.url
+        else:
+            ce_conf = load_ce_config()
+            if ce_conf is None:
+                print("Error: No CE configuration found. Please run 'bloodhound-cli --edition ce auth --base-url https://bhce.local --username <user>'")
+                exit(1)
+            if "base_url" not in ce_conf:
+                print("Error: The key 'base_url' was not found in the CE configuration. Please run 'bloodhound-cli --edition ce auth --base-url https://bhce.local --username <user>'")
+                exit(1)
+            base_url = ce_conf["base_url"]
+            api_token = ce_conf.get("api_token", "")
+            analyzer = BloodHoundCEClient(base_url=base_url, api_token=api_token, debug=args.debug, verbose=args.verbose, verify=verify)
     try:
         if args.subcommand == "acl":
             analyzer.print_aces(args.source, args.relation, args.target, args.source_domain, args.target_domain)
@@ -1172,6 +1496,36 @@ def main():
             if args.laps is not None:
                 laps = True if args.laps.lower() == "true" else False
             analyzer.print_computers(args.domain, args.output, laps)
+        elif args.subcommand == "auth":
+            if selected_edition != "ce":
+                print("The 'auth' subcommand is only available for --edition ce")
+            else:
+                password = args.password or getpass.getpass("CE Password: ")
+                token = analyzer.authenticate(args.username, password, login_path=args.login_path)
+                if token:
+                    # persist token
+                    save_ce_config(base_url, token)
+                    print("Authentication successful. Token saved to configuration.")
+        elif args.subcommand == "upload":
+            if selected_edition != "ce":
+                print("The 'upload' subcommand is only available for --edition ce")
+            else:
+                ce_conf = load_ce_config()
+                token_present = ce_conf and ce_conf.get("api_token")
+                if not token_present:
+                    print("No CE API token found. Run 'bloodhound-cli --edition ce auth --url http://localhost:7474 --username <user>' first.")
+                else:
+                    results = analyzer.upload_files(
+                        args.files,
+                        start_path=args.start_path,
+                        upload_path_tpl=args.upload_path,
+                        end_path_tpl=args.end_path,
+                        content_type=args.content_type,
+                        tag=args.tag,
+                    )
+                    print("\nUpload results\n" + "=" * 50)
+                    for f, msg in results.items():
+                        print(f"{f}: {msg}")
         elif args.subcommand == "user":
             if args.password_last_change:
                 analyzer.print_password_last_change(args.domain, user=args.user, output=args.output)
