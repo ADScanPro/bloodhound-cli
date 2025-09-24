@@ -190,6 +190,13 @@ pip install bloodhound-cli
 
 ## Changelog
 
+- 1.0.0
+  - Major release with stable API
+  - Remove automatic version bumping workflow
+  - Manual version control for better release management
+  - Enhanced CE support and authentication flow
+  - Improved CLI structure and user experience
+
 - 0.2.0
   - Add `--edition` and `--verbose` global flags
   - Add CE configuration `set-ce` and CE client skeleton
