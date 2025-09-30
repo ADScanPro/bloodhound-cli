@@ -220,82 +220,257 @@ class BloodHoundCEClient(BloodHoundClient):
             return []
     
     def get_password_not_required_users(self, domain: str) -> List[str]:
-        query = f"""
-        MATCH (u:User)
-        WHERE u.enabled = true AND toLower(u.domain) = toLower('{domain}')
-          AND u.passwordnotreqd = true
-        RETURN u.samaccountname AS samaccountname
-        """
-        results = self.execute_query(query)
-        return [record["samaccountname"] for record in results]
+        """Get enabled users with password not required using CySQL query"""
+        try:
+            # Use CySQL query to get enabled users with passwordnotreqd = true in specific domain
+            cypher_query = f"""
+            MATCH (u:User) 
+            WHERE u.passwordnotreqd = true AND u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+            RETURN u
+            """
+            
+            result = self.execute_query(cypher_query)
+            users = []
+            
+            # execute_query returns a list of node properties
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    samaccountname = node_properties.get('samaccountname') or node_properties.get('name', '')
+                    if samaccountname:
+                        # Extract just the username part (before @) if it's in UPN format
+                        if "@" in samaccountname:
+                            samaccountname = samaccountname.split("@")[0]
+                        users.append(samaccountname)
+            
+            return users
+
+        except Exception:
+            return []
     
     def get_password_never_expires_users(self, domain: str) -> List[str]:
-        query = f"""
-        MATCH (u:User)
-        WHERE u.enabled = true AND toLower(u.domain) = toLower('{domain}')
-          AND u.pwdneverexpires = true
-        RETURN u.samaccountname AS samaccountname
-        """
-        results = self.execute_query(query)
-        return [record["samaccountname"] for record in results]
+        """Get enabled users with password never expires using CySQL query"""
+        try:
+            # Use CySQL query to get enabled users with pwdneverexpires = true in specific domain
+            cypher_query = f"""
+            MATCH (u:User) 
+            WHERE u.pwdneverexpires = true AND u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+            RETURN u
+            """
+            
+            result = self.execute_query(cypher_query)
+            users = []
+            
+            # execute_query returns a list of node properties
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    samaccountname = node_properties.get('samaccountname') or node_properties.get('name', '')
+                    if samaccountname:
+                        # Extract just the username part (before @) if it's in UPN format
+                        if "@" in samaccountname:
+                            samaccountname = samaccountname.split("@")[0]
+                        users.append(samaccountname)
+            
+            return users
+
+        except Exception:
+            return []
     
     def get_sessions(self, domain: str, da: bool = False) -> List[Dict]:
-        if da:
-            query = f"""
-            MATCH (c:Computer)-[r:HasSession]->(u:User)
-            WHERE toLower(c.domain) = toLower('{domain}') AND u.enabled = true
-            RETURN c.name AS computer, u.samaccountname AS user
-            """
-        else:
-            query = f"""
-            MATCH (u:User)-[r:HasSession]->(c:Computer)
-            WHERE toLower(u.domain) = toLower('{domain}') AND u.enabled = true
-            RETURN u.samaccountname AS user, c.name AS computer
-            """
-        return self.execute_query(query)
+        """Get user sessions using CySQL query"""
+        try:
+            if da:
+                # Get sessions from computer perspective
+                cypher_query = f"""
+                MATCH (c:Computer)-[r:HasSession]->(u:User)
+                WHERE toUpper(c.domain) = '{domain.upper()}' AND u.enabled = true
+                RETURN c, u
+                """
+            else:
+                # Get sessions from user perspective
+                cypher_query = f"""
+                MATCH (u:User)-[r:HasSession]->(c:Computer)
+                WHERE toUpper(u.domain) = '{domain.upper()}' AND u.enabled = true
+                RETURN u, c
+                """
+            
+            result = self.execute_query(cypher_query)
+            sessions = []
+            
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    if da:
+                        # Computer -> User session
+                        computer_name = node_properties.get('name', '')
+                        user_name = node_properties.get('samaccountname', '')
+                        if computer_name and user_name:
+                            # Extract just the computer name part (before @) if it's in UPN format
+                            if "@" in computer_name:
+                                computer_name = computer_name.split("@")[0]
+                            # Extract just the username part (before @) if it's in UPN format
+                            if "@" in user_name:
+                                user_name = user_name.split("@")[0]
+                            sessions.append({"computer": computer_name.lower(), "user": user_name})
+                    else:
+                        # User -> Computer session
+                        user_name = node_properties.get('samaccountname', '')
+                        computer_name = node_properties.get('name', '')
+                        if user_name and computer_name:
+                            # Extract just the username part (before @) if it's in UPN format
+                            if "@" in user_name:
+                                user_name = user_name.split("@")[0]
+                            # Extract just the computer name part (before @) if it's in UPN format
+                            if "@" in computer_name:
+                                computer_name = computer_name.split("@")[0]
+                            sessions.append({"user": user_name, "computer": computer_name.lower()})
+            
+            return sessions
+
+        except Exception:
+            return []
     
     def get_password_last_change(self, domain: str, user: Optional[str] = None) -> List[Dict]:
-        if user:
-            query = f"""
-            MATCH (u:User)
-            WHERE u.enabled = true AND toLower(u.domain) = toLower('{domain}')
-              AND u.samaccountname = '{user}'
-            RETURN u.samaccountname AS samaccountname, u.pwdlastset AS pwdlastset, u.whencreated AS whencreated
-            """
-        else:
-            query = f"""
-            MATCH (u:User)
-            WHERE u.enabled = true AND toLower(u.domain) = toLower('{domain}')
-            RETURN u.samaccountname AS samaccountname, u.pwdlastset AS pwdlastset, u.whencreated AS whencreated
-            """
-        return self.execute_query(query)
+        """Get password last change information using CySQL query"""
+        try:
+            if user:
+                cypher_query = f"""
+                MATCH (u:User)
+                WHERE u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+                  AND u.samaccountname = '{user}'
+                RETURN u
+                """
+            else:
+                cypher_query = f"""
+                MATCH (u:User)
+                WHERE u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+                RETURN u
+                """
+            
+            result = self.execute_query(cypher_query)
+            password_info = []
+            
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    samaccountname = node_properties.get('samaccountname', '')
+                    pwdlastset = node_properties.get('pwdlastset', 0)
+                    whencreated = node_properties.get('whencreated', 0)
+                    
+                    if samaccountname:
+                        # Extract just the username part (before @) if it's in UPN format
+                        if "@" in samaccountname:
+                            samaccountname = samaccountname.split("@")[0]
+                        
+                        password_info.append({
+                            "samaccountname": samaccountname,
+                            "pwdlastset": pwdlastset,
+                            "whencreated": whencreated
+                        })
+            
+            return password_info
+
+        except Exception:
+            return []
     
     def get_critical_aces(self, source_domain: str, high_value: bool = False, 
                          username: str = "all", target_domain: str = "all", 
                          relation: str = "all") -> List[Dict]:
-        query = f"""
-        MATCH (s)-[r]->(t)
-        WHERE toLower(s.domain) = toLower('{source_domain}')
-        RETURN s.name AS source, r.relation AS relation, t.name AS target
-        """
-        return self.execute_query(query)
+        """Get critical ACEs using CySQL query"""
+        try:
+            cypher_query = f"""
+            MATCH (s)-[r]->(t)
+            WHERE toUpper(s.domain) = '{source_domain.upper()}'
+            RETURN s, r, t
+            """
+            
+            result = self.execute_query(cypher_query)
+            aces = []
+            
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    source_name = node_properties.get('name', '')
+                    target_name = node_properties.get('name', '')
+                    relation_type = node_properties.get('relation', '')
+                    
+                    if source_name and target_name:
+                        # Extract just the name part (before @) if it's in UPN format
+                        if "@" in source_name:
+                            source_name = source_name.split("@")[0]
+                        if "@" in target_name:
+                            target_name = target_name.split("@")[0]
+                        
+                        aces.append({
+                            "source": source_name,
+                            "relation": relation_type,
+                            "target": target_name
+                        })
+            
+            return aces
+
+        except Exception:
+            return []
     
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
-        query = f"""
-        MATCH path = (s)-[*1..10]->(t)
-        WHERE s.name = '{source}' AND t.name = '{target}'
-        RETURN path
-        """
-        return self.execute_query(query)
+        """Get access paths using CySQL query"""
+        try:
+            cypher_query = f"""
+            MATCH path = (s)-[*1..10]->(t)
+            WHERE s.name = '{source}' AND t.name = '{target}'
+            RETURN path
+            """
+            
+            result = self.execute_query(cypher_query)
+            paths = []
+            
+            if result and isinstance(result, list):
+                for path_data in result:
+                    # Process path data - this might need adjustment based on actual CySQL response format
+                    if isinstance(path_data, dict):
+                        paths.append({
+                            "source": source,
+                            "target": target,
+                            "path": path_data
+                        })
+            
+            return paths
+
+        except Exception:
+            return []
     
     def get_critical_aces_by_domain(self, domain: str, blacklist: List[str], 
                                    high_value: bool = False) -> List[Dict]:
-        query = f"""
-        MATCH (s)-[r]->(t)
-        WHERE toLower(s.domain) = toLower('{domain}')
-        RETURN s.name AS source, r.relation AS relation, t.name AS target
-        """
-        return self.execute_query(query)
+        """Get critical ACEs by domain using CySQL query"""
+        try:
+            cypher_query = f"""
+            MATCH (s)-[r]->(t)
+            WHERE toUpper(s.domain) = '{domain.upper()}'
+            RETURN s, r, t
+            """
+            
+            result = self.execute_query(cypher_query)
+            aces = []
+            
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    source_name = node_properties.get('name', '')
+                    target_name = node_properties.get('name', '')
+                    relation_type = node_properties.get('relation', '')
+                    
+                    if source_name and target_name:
+                        # Extract just the name part (before @) if it's in UPN format
+                        if "@" in source_name:
+                            source_name = source_name.split("@")[0]
+                        if "@" in target_name:
+                            target_name = target_name.split("@")[0]
+                        
+                        aces.append({
+                            "source": source_name,
+                            "relation": relation_type,
+                            "target": target_name
+                        })
+            
+            return aces
+
+        except Exception:
+            return []
     
     def close(self):
         """Close the HTTP session"""

@@ -100,6 +100,10 @@ def cmd_users(args):
         print(f"Debug: Password = {args.password}")
         print(f"Debug: High value filter = {args.high_value}")
         print(f"Debug: Admin count filter = {args.admin_count}")
+        print(f"Debug: Password never expires filter = {args.password_never_expires}")
+        print(f"Debug: Password not required filter = {args.password_not_required}")
+        print(f"Debug: Password last change filter = {args.password_last_change}")
+        print(f"Debug: Specific user = {args.user}")
     
     client = get_client(
         args.edition,
@@ -118,12 +122,34 @@ def cmd_users(args):
             print(f"Debug: Client created, getting users...")
         
         # Determine which function to call based on parameters
-        if args.high_value:
+        if args.password_last_change:
+            password_info = client.get_password_last_change(args.domain, args.user)
+            if args.verbose:
+                if args.user:
+                    print(f"Password last change information for user {args.user} in domain {args.domain}:")
+                else:
+                    print(f"Password last change information for all users in domain {args.domain}:")
+            
+            # Format password info for output
+            results = []
+            for info in password_info:
+                results.append(f"{info['samaccountname']}: pwdlastset={info['pwdlastset']}, whencreated={info['whencreated']}")
+            
+            output_results(results, args.output, args.verbose, "password info")
+            return
+            
+        elif args.high_value:
             users = client.get_highvalue_users(args.domain)
             user_type = "high value users"
         elif args.admin_count:
             users = client.get_admin_users(args.domain)
             user_type = "admin users"
+        elif args.password_never_expires:
+            users = client.get_password_never_expires_users(args.domain)
+            user_type = "users with password never expires"
+        elif args.password_not_required:
+            users = client.get_password_not_required_users(args.domain)
+            user_type = "users with password not required"
         else:
             users = client.get_users(args.domain)
             user_type = "users"
@@ -173,6 +199,95 @@ def cmd_computers(args):
         client.close()
 
 
+def cmd_sessions(args):
+    """List user sessions in a domain"""
+    if args.debug:
+        print(f"Debug: Creating client for edition {args.edition}")
+        print(f"Debug: Domain = {args.domain}")
+        print(f"Debug: DA mode = {args.da}")
+    
+    client = get_client(
+        args.edition,
+        uri=args.uri,
+        user=args.user,
+        password=args.password,
+        base_url=args.base_url,
+        username=args.username,
+        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
+        debug=args.debug,
+        verbose=args.verbose
+    )
+    
+    try:
+        sessions = client.get_sessions(args.domain, da=args.da)
+        
+        if args.verbose:
+            if args.da:
+                print(f"Found {len(sessions)} sessions from computer perspective in domain {args.domain}")
+            else:
+                print(f"Found {len(sessions)} sessions from user perspective in domain {args.domain}")
+        
+        # Format sessions for output
+        results = []
+        for session in sessions:
+            if args.da:
+                # Computer -> User format
+                results.append(f"{session['computer']} -> {session['user']}")
+            else:
+                # User -> Computer format
+                results.append(f"{session['user']} -> {session['computer']}")
+        
+        # Output results to console or file
+        output_results(results, args.output, args.verbose, "sessions")
+            
+    finally:
+        client.close()
+
+
+def cmd_acl(args):
+    """List critical ACEs"""
+    if args.debug:
+        print(f"Debug: Creating client for edition {args.edition}")
+        print(f"Debug: Source domain = {args.source_domain}")
+        print(f"Debug: Source = {args.source}")
+        print(f"Debug: Relation = {args.relation}")
+        print(f"Debug: Target = {args.target}")
+        print(f"Debug: High value = {args.high_value}")
+    
+    client = get_client(
+        args.edition,
+        uri=args.uri,
+        user=args.user,
+        password=args.password,
+        base_url=args.base_url,
+        username=args.username,
+        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
+        debug=args.debug,
+        verbose=args.verbose
+    )
+    
+    try:
+        # Use get_critical_aces_by_domain for now (can be enhanced later)
+        aces = client.get_critical_aces_by_domain(
+            args.source_domain, 
+            blacklist=[], 
+            high_value=args.high_value
+        )
+        
+        if args.verbose:
+            print(f"Found {len(aces)} critical ACEs in domain {args.source_domain}")
+        
+        # Format ACEs for output
+        results = []
+        for ace in aces:
+            ace_str = f"{ace['source']} -> {ace['target']} ({ace['relation']})"
+            results.append(ace_str)
+        
+        # Output results to console or file
+        output_results(results, args.output, args.verbose, "ACEs")
+            
+    finally:
+        client.close()
 
 
 def main():
@@ -209,8 +324,12 @@ def main():
     # Users command
     users_parser = subparsers.add_parser('user', help='List users')
     users_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
+    users_parser.add_argument('-u', '--user', help='Specific user to query (for password-last-change)')
     users_parser.add_argument('--high-value', action='store_true', help='Show only high value users')
     users_parser.add_argument('--admin-count', action='store_true', help='Show only admin users')
+    users_parser.add_argument('--password-never-expires', action='store_true', help='Show only users with password never expires')
+    users_parser.add_argument('--password-not-required', action='store_true', help='Show only users with password not required')
+    users_parser.add_argument('--password-last-change', action='store_true', help='Show password last change information')
     users_parser.set_defaults(func=cmd_users)
     
     # Computers command
@@ -218,6 +337,21 @@ def main():
     computers_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
     computers_parser.add_argument('--laps', choices=['true', 'false'], help='Filter by LAPS status (true/false)')
     computers_parser.set_defaults(func=cmd_computers)
+    
+    # Sessions command
+    sessions_parser = subparsers.add_parser('session', help='List user sessions')
+    sessions_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
+    sessions_parser.add_argument('--da', action='store_true', help='Show sessions from computer perspective (Domain Admin view)')
+    sessions_parser.set_defaults(func=cmd_sessions)
+    
+    # ACL command
+    acl_parser = subparsers.add_parser('acl', help='List critical ACEs')
+    acl_parser.add_argument('-s', '--source', help='Source username to filter by')
+    acl_parser.add_argument('-sd', '--source-domain', required=True, help='Source domain to query')
+    acl_parser.add_argument('-r', '--relation', help='Relation type to filter by')
+    acl_parser.add_argument('-t', '--target', help='Target to filter by (e.g., high-value)')
+    acl_parser.add_argument('--high-value', action='store_true', help='Show only high value targets')
+    acl_parser.set_defaults(func=cmd_acl)
     
     
     args = parser.parse_args()
