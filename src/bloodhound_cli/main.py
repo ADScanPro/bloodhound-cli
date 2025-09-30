@@ -4,6 +4,8 @@ BloodHound CLI - Modular Architecture
 """
 import os
 import argparse
+import configparser
+import getpass
 from typing import List, Dict, Optional
 from pathlib import Path
 
@@ -15,6 +17,8 @@ try:
 except Exception:
     _RICH_AVAILABLE = False
     console = None
+
+CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 
 from .core.factory import create_bloodhound_client
 
@@ -44,10 +48,10 @@ def output_results(results, output_file=None, verbose=False, result_type="result
             # Fallback to console output
             for result in results:
                 print(result)
-    else:
-        # Console output
-        for result in results:
-            print(result)
+        else:
+            # Console output
+            for result in results:
+                print(result)
 
 
 def get_client(edition: str, **kwargs):
@@ -290,6 +294,153 @@ def cmd_acl(args):
         client.close()
 
 
+def cmd_upload(args):
+    """Upload BloodHound data"""
+    if args.debug:
+        print(f"Debug: Creating client for edition {args.edition}")
+        print(f"Debug: File = {args.file}")
+        print(f"Debug: List jobs = {args.list_jobs}")
+        print(f"Debug: Accepted types = {args.accepted_types}")
+    
+    client = get_client(
+        args.edition,
+        uri=args.uri,
+        user=args.user,
+        password=args.password,
+        base_url=args.base_url,
+        username=args.username,
+        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
+        debug=args.debug,
+        verbose=args.verbose
+    )
+    
+    try:
+        if args.list_jobs:
+            # List upload jobs
+            jobs = client.list_upload_jobs()
+            if args.verbose:
+                print(f"Found {len(jobs)} upload jobs")
+            
+            results = []
+            for job in jobs:
+                job_info = f"Job ID: {job.get('id', 'N/A')}, Status: {job.get('status', 'N/A')}, Created: {job.get('created_at', 'N/A')}"
+                results.append(job_info)
+            
+            output_results(results, args.output, args.verbose, "upload jobs")
+            
+        elif args.accepted_types:
+            # Show accepted file types
+            types = client.get_accepted_upload_types()
+            if args.verbose:
+                print(f"Accepted file types: {', '.join(types)}")
+            
+            output_results(types, args.output, args.verbose, "accepted types")
+            
+        else:
+            # Upload file
+            if not args.file:
+                print("Error: File path required for upload. Use -f/--file to specify the file to upload.")
+                return
+                
+            if not os.path.exists(args.file):
+                print(f"Error: File {args.file} does not exist")
+                return
+            
+            if args.verbose:
+                print(f"Uploading file: {args.file}")
+                print(f"Wait for completion: {args.wait}")
+                if args.wait:
+                    print(f"Poll interval: {args.poll_interval} seconds")
+                    print(f"Timeout: {args.timeout} seconds")
+            
+            if args.wait:
+                # Use the new upload_and_wait method
+                success = client.upload_data_and_wait(
+                    args.file, 
+                    poll_interval=args.poll_interval, 
+                    timeout_seconds=args.timeout
+                )
+            else:
+                # Use the simple upload method
+                success = client.upload_data(args.file)
+                if success:
+                    if args.verbose:
+                        print("✅ File uploaded successfully")
+                    else:
+                        print("Upload successful")
+                else:
+                    print("❌ Upload failed")
+                    return
+            
+    finally:
+        client.close()
+
+
+def cmd_auth(args):
+    """Authenticate to BloodHound CE and save API token"""
+    import getpass
+    
+    if args.debug:
+        print(f"Debug: BloodHound CE URL = {args.url}")
+        print(f"Debug: Username = {args.username}")
+        print(f"Debug: Login path = {args.login_path}")
+        print(f"Debug: Insecure = {args.insecure}")
+    
+    # Get password if not provided
+    password = args.password
+    if not password:
+        password = getpass.getpass("CE Password: ")
+    
+    # Create a temporary client for authentication
+    from .core.ce import BloodHoundCEClient
+    
+    client = BloodHoundCEClient(
+        base_url=args.url,
+        verify=not args.insecure
+    )
+    
+    try:
+        # Authenticate
+        token = client.authenticate(args.username, password, args.login_path)
+        
+        if not token:
+            print("Authentication failed")
+            return
+        
+        # Save configuration
+        config = load_config()
+        if not config:
+            config = configparser.ConfigParser()
+        
+        # Update CE section
+        if 'CE' not in config:
+            config['CE'] = {}
+        
+        config['CE']['base_url'] = args.url
+        config['CE']['api_token'] = token
+        
+        # Update GENERAL section
+        if 'GENERAL' not in config:
+            config['GENERAL'] = {}
+        config['GENERAL']['edition'] = 'ce'
+        
+        # Save config
+        try:
+            with open(CONFIG_PATH, 'w') as f:
+                config.write(f)
+            print(f"CE configuration saved at {CONFIG_PATH}")
+            print("Authentication successful. Token saved to configuration.")
+        except Exception as e:
+            print(f"Error saving configuration: {e}")
+            print("Authentication successful, but failed to save token.")
+            
+    except Exception as e:
+        print(f"Authentication error: {e}")
+        
+    finally:
+        client.close()
+
+
 def main():
     """Main CLI entry point"""
     # Load configuration to get default edition
@@ -352,6 +503,26 @@ def main():
     acl_parser.add_argument('-t', '--target', help='Target to filter by (e.g., high-value)')
     acl_parser.add_argument('--high-value', action='store_true', help='Show only high value targets')
     acl_parser.set_defaults(func=cmd_acl)
+    
+    # Upload command
+    upload_parser = subparsers.add_parser('upload', help='Upload BloodHound data')
+    upload_parser.add_argument('-f', '--file', help='Path to ZIP file to upload')
+    upload_parser.add_argument('--list-jobs', action='store_true', help='List upload jobs')
+    upload_parser.add_argument('--accepted-types', action='store_true', help='Show accepted file types')
+    upload_parser.add_argument('--wait', action='store_true', default=True, help='Wait for ingestion to complete (default)')
+    upload_parser.add_argument('--no-wait', action='store_false', dest='wait', help='Return immediately after upload is accepted')
+    upload_parser.add_argument('--poll-interval', type=int, default=5, help='Seconds between status checks (default: 5)')
+    upload_parser.add_argument('--timeout', type=int, default=1800, help='Max seconds to wait for completion (default: 1800)')
+    upload_parser.set_defaults(func=cmd_upload)
+    
+    # Auth command
+    auth_parser = subparsers.add_parser('auth', help='Authenticate to BloodHound CE and save API token')
+    auth_parser.add_argument('-u', '--url', default='http://localhost:8080', help='BloodHound CE base URL (default: http://localhost:8080)')
+    auth_parser.add_argument('--username', default='admin', help='CE username (default: admin)')
+    auth_parser.add_argument('--password', help='CE password (if omitted, prompt securely)')
+    auth_parser.add_argument('--login-path', default='/api/v2/login', help='Login path (default: /api/v2/login)')
+    auth_parser.add_argument('--insecure', action='store_true', help='Disable TLS certificate verification')
+    auth_parser.set_defaults(func=cmd_auth)
     
     
     args = parser.parse_args()

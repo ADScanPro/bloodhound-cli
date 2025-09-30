@@ -5,6 +5,7 @@ import requests
 import os
 import configparser
 from typing import List, Dict, Optional
+from pathlib import Path
 from .base import BloodHoundClient
 
 
@@ -471,6 +472,227 @@ class BloodHoundCEClient(BloodHoundClient):
 
         except Exception:
             return []
+    
+    def _get_headers(self):
+        """Get headers for API requests"""
+        headers = {
+            'User-Agent': 'BloodHound-CLI/1.0'
+        }
+        
+        if self.api_token:
+            headers['Authorization'] = f'Bearer {self.api_token}'
+        
+        return headers
+    
+    def upload_data(self, file_path: str) -> bool:
+        """Upload BloodHound data using the file upload API"""
+        try:
+            # Step 1: Create file upload job
+            create_response = self.session.post(
+                f"{self.base_url}/api/v2/file-upload/start",
+                headers=self._get_headers(),
+                json={"collection_method": "manual"}
+            )
+            
+            if create_response.status_code not in [200, 201]:
+                print(f"Error creating upload job: {create_response.status_code} - {create_response.text}")
+                return False
+                
+            job_data = create_response.json()
+            # The response structure is {"data": {"id": "..."}}
+            job_id = job_data.get("data", {}).get("id")
+            
+            if not job_id:
+                print(f"Error: Failed to create upload job. Response: {job_data}")
+                return False
+            
+            # Step 2: Upload file to job
+            fpath = Path(file_path)
+            if not fpath.exists() or not fpath.is_file():
+                print(f"Error: File {file_path} not found")
+                return False
+            
+            # Determine content type
+            suffix = fpath.suffix.lower()
+            if suffix == ".zip":
+                content_type = "application/zip"
+            elif suffix == ".json":
+                content_type = "application/json"
+            else:
+                content_type = "application/octet-stream"
+            
+            headers = self._get_headers()
+            headers["Content-Type"] = content_type
+            
+            with open(file_path, 'rb') as f:
+                body = f.read()
+                upload_response = self.session.post(
+                    f"{self.base_url}/api/v2/file-upload/{job_id}",
+                    data=body,
+                    headers=headers
+                )
+                
+                if upload_response.status_code >= 400:
+                    print(f"Error uploading file: HTTP {upload_response.status_code} - {upload_response.text}")
+                    return False
+            
+            # Step 3: End upload job
+            end_response = self.session.post(
+                f"{self.base_url}/api/v2/file-upload/{job_id}/end",
+                headers=self._get_headers()
+            )
+            
+            if end_response.status_code >= 400:
+                print(f"Error ending upload job: HTTP {end_response.status_code} - {end_response.text}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error uploading data: {e}")
+            return False
+    
+    def list_upload_jobs(self) -> List[Dict]:
+        """List file upload jobs"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/v2/file-upload",
+                headers=self._get_headers()
+            )
+            response.raise_for_status()
+            data = response.json()
+            # The response structure might be {"data": [...]} or just [...]
+            if isinstance(data, dict) and "data" in data:
+                return data["data"]
+            elif isinstance(data, list):
+                return data
+            else:
+                return []
+        except Exception as e:
+            print(f"Error listing upload jobs: {e}")
+            return []
+    
+    def get_accepted_upload_types(self) -> List[str]:
+        """Get accepted file upload types"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/v2/file-upload/accepted-types",
+                headers=self._get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"Error getting accepted types: {e}")
+            return []
+    
+    def get_file_upload_job(self, job_id: int) -> Optional[Dict]:
+        """Get specific file upload job details"""
+        try:
+            # Use the list endpoint and filter by job_id
+            response = self.session.get(
+                f"{self.base_url}/api/v2/file-upload",
+                headers=self._get_headers()
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # The response structure might be {"data": [...]} or just [...]
+            jobs = []
+            if isinstance(data, dict) and "data" in data:
+                jobs = data["data"]
+            elif isinstance(data, list):
+                jobs = data
+            
+            # Find the job with the matching ID
+            for job in jobs:
+                if job.get("id") == job_id:
+                    return job
+            
+            return None
+        except Exception as e:
+            print(f"Error getting upload job {job_id}: {e}")
+            return None
+    
+    def infer_latest_file_upload_job_id(self) -> Optional[int]:
+        """Infer the latest file upload job ID from the list"""
+        try:
+            jobs = self.list_upload_jobs()
+            if not jobs:
+                return None
+            
+            # Find the most recent job (highest ID or most recent timestamp)
+            latest_job = max(jobs, key=lambda x: x.get('id', 0))
+            return latest_job.get('id')
+        except Exception as e:
+            print(f"Error inferring latest job ID: {e}")
+            return None
+    
+    def upload_data_and_wait(self, file_path: str, poll_interval: int = 5, timeout_seconds: int = 1800) -> bool:
+        """Upload BloodHound data and wait for processing to complete"""
+        import time
+        
+        try:
+            # Step 1: Upload the file
+            success = self.upload_data(file_path)
+            if not success:
+                return False
+            
+            # Step 2: Wait for processing to complete
+            start_time = time.time()
+            last_status = None
+            job = None
+            
+            print("Waiting for ingestion to complete...")
+            
+            while True:
+                # Get the latest job ID
+                job_id = self.infer_latest_file_upload_job_id()
+                if job_id is None:
+                    # Brief grace period immediately after upload
+                    if time.time() - start_time > 15:
+                        print("Timeout: Could not find upload job")
+                        return False
+                else:
+                    # Get job details
+                    job = self.get_file_upload_job(job_id)
+                    if job is None:
+                        if time.time() - start_time > 15:
+                            print("Timeout: Could not get job details")
+                            return False
+                    else:
+                        status = job.get("status")
+                        status_message = job.get("status_message", "")
+                        
+                        # Show status if it changed
+                        if status != last_status:
+                            print(f"Job status: {status} - {status_message}")
+                            last_status = status
+                        
+                        # Terminal statuses: -1 invalid, 2 complete, 3 canceled, 4 timed out, 5 failed, 8 partially complete
+                        if status in [-1, 2, 3, 4, 5, 8]:
+                            if status == 2:
+                                print("✅ Upload and processing completed successfully")
+                                return True
+                            elif status in [3, 4, 5]:
+                                print(f"❌ Upload failed with status {status}: {status_message}")
+                                return False
+                            elif status == 8:
+                                print("⚠️ Upload completed with warnings (partially complete)")
+                                return True
+                            else:
+                                print(f"❌ Upload failed with status {status}: {status_message}")
+                                return False
+                
+                # Check timeout
+                if time.time() - start_time > timeout_seconds:
+                    print(f"❌ Timeout after {timeout_seconds} seconds")
+                    return False
+                
+                time.sleep(max(1, poll_interval))
+            
+        except Exception as e:
+            print(f"Error in upload and wait: {e}")
+            return False
     
     def close(self):
         """Close the HTTP session"""
