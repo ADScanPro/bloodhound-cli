@@ -48,10 +48,10 @@ def output_results(results, output_file=None, verbose=False, result_type="result
             # Fallback to console output
             for result in results:
                 print(result)
-        else:
-            # Console output
-            for result in results:
-                print(result)
+    else:
+        # Console output
+        for result in results:
+            print(result)
 
 
 def get_client(edition: str, **kwargs):
@@ -84,8 +84,9 @@ def get_client(edition: str, **kwargs):
             verify=kwargs.get('verify', True)
         )
         
-        # Only authenticate if no token is available (either from config or parameters)
-        if not client.api_token:
+        # Ensure we have a valid token
+        if not client.ensure_valid_token():
+            # If auto-renewal failed, try manual authentication
             username = kwargs.get('username', 'admin')
             password = kwargs.get('ce_password', kwargs.get('password', 'Bloodhound123!'))
             client.authenticate(username, password)
@@ -165,7 +166,7 @@ def cmd_users(args):
             print(f"Found {len(users)} {user_type} in domain {args.domain}")
         
         # Output results to console or file
-        output_results(users, args.output, args.verbose, user_type)
+        output_results(users, args.output, False, user_type)
             
     finally:
         client.close()
@@ -197,7 +198,7 @@ def cmd_computers(args):
             print(f"Found {len(computers)} computers in domain {args.domain}")
         
         # Output results to console or file
-        output_results(computers, args.output, args.verbose, "computers")
+        output_results(computers, args.output, False, "computers")
             
     finally:
         client.close()
@@ -418,6 +419,8 @@ def cmd_auth(args):
         
         config['CE']['base_url'] = args.url
         config['CE']['api_token'] = token
+        config['CE']['username'] = args.username
+        config['CE']['password'] = password  # Store password for auto-renewal
         
         # Update GENERAL section
         if 'GENERAL' not in config:

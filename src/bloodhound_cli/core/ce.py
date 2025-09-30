@@ -694,6 +694,88 @@ class BloodHoundCEClient(BloodHoundClient):
             print(f"Error in upload and wait: {e}")
             return False
     
+    def verify_token(self) -> bool:
+        """Verify if the current token is valid by making a test request"""
+        try:
+            # Try to make a simple API call to verify the token
+            response = self.session.get(
+                f"{self.base_url}/api/v2/file-upload",
+                headers=self._get_headers()
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+    
+    def auto_renew_token(self) -> bool:
+        """Automatically renew the token using stored credentials"""
+        try:
+            # Load config to get stored credentials
+            config = configparser.ConfigParser()
+            config.read(os.path.expanduser("~/.bloodhound_config"))
+            
+            if 'CE' not in config:
+                return False
+            
+            username = config['CE'].get('username', 'admin')
+            password = config['CE'].get('password')
+            base_url = config['CE'].get('base_url', 'http://localhost:8080')
+            
+            if not password:
+                return False
+            
+            # Create a new session for authentication (without the expired token)
+            import requests
+            temp_session = requests.Session()
+            temp_session.verify = self.session.verify
+            
+            # Authenticate with stored credentials using the temp session
+            login_url = f"{base_url}/api/v2/login"
+            payload = {"login_method": "secret", "username": username, "secret": password}
+            
+            response = temp_session.post(login_url, json=payload, timeout=60)
+            if response.status_code >= 400:
+                return False
+                
+            data = response.json()
+            token = None
+            if isinstance(data, dict):
+                data_field = data.get("data")
+                if isinstance(data_field, dict):
+                    token = data_field.get("session_token")
+            if not token:
+                token = data.get("token") or data.get("access_token") or data.get("jwt")
+            
+            if not token:
+                return False
+            
+            # Update the stored token and our session
+            config['CE']['api_token'] = token
+            with open(os.path.expanduser("~/.bloodhound_config"), 'w') as f:
+                config.write(f)
+            
+            # Update our session with the new token
+            self.api_token = token
+            self.session.headers.update({"Authorization": f"Bearer {token}"})
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error auto-renewing token: {e}")
+            return False
+    
+    def ensure_valid_token(self) -> bool:
+        """Ensure we have a valid token, auto-renew if necessary"""
+        if not self.api_token:
+            return self.auto_renew_token()
+        
+        # Check if current token is valid
+        if self.verify_token():
+            return True
+        
+        # Token is invalid, try to renew
+        print("Token expired, attempting to renew...")
+        return self.auto_renew_token()
+    
     def close(self):
         """Close the HTTP session"""
         try:
