@@ -329,31 +329,63 @@ class TestCEQueries:
         assert "NORTH.SEVENKINGDOMS.LOCAL" in call_args
     
     def test_get_computers_with_laps_filter(self, mock_ce_client):
-        """Test computer enumeration with LAPS filtering"""
-        mock_ce_client.execute_query.return_value = [
-            {
-                "name": "DC01@north.sevenkingdoms.local",
-                "enabled": True,
-                "haslaps": True,
-                "domain": "north.sevenkingdoms.local"
-            },
-            {
-                "name": "WORKSTATION01@north.sevenkingdoms.local",
-                "enabled": True,
-                "haslaps": False,
-                "domain": "north.sevenkingdoms.local"
-            }
-        ]
+        """Test computer enumeration with LAPS filtering using real essos.local data"""
+        # Mock execute_query to return different data based on LAPS filter
+        def mock_execute_query_with_laps(query):
+            if "c.haslaps = true" in query:
+                # Computers with LAPS
+                return [
+                    {
+                        "name": "BRAAVOS@ESSOS.LOCAL",
+                        "enabled": True,
+                        "haslaps": True,
+                        "domain": "ESSOS.LOCAL"
+                    }
+                ]
+            elif "c.haslaps = false" in query:
+                # Computers without LAPS
+                return [
+                    {
+                        "name": "MEEREEN@ESSOS.LOCAL",
+                        "enabled": True,
+                        "haslaps": False,
+                        "domain": "ESSOS.LOCAL"
+                    }
+                ]
+            else:
+                # All computers
+                return [
+                    {
+                        "name": "BRAAVOS@ESSOS.LOCAL",
+                        "enabled": True,
+                        "haslaps": True,
+                        "domain": "ESSOS.LOCAL"
+                    },
+                    {
+                        "name": "MEEREEN@ESSOS.LOCAL",
+                        "enabled": True,
+                        "haslaps": False,
+                        "domain": "ESSOS.LOCAL"
+                    }
+                ]
+        
+        mock_ce_client.execute_query = Mock(side_effect=mock_execute_query_with_laps)
         
         # Test with LAPS=True
-        computers_with_laps = mock_ce_client.get_computers("north.sevenkingdoms.local", laps=True)
+        computers_with_laps = mock_ce_client.get_computers("essos.local", laps=True)
         assert len(computers_with_laps) == 1
-        assert "dc01" in computers_with_laps
+        assert "braavos" in computers_with_laps
         
         # Test with LAPS=False
-        computers_without_laps = mock_ce_client.get_computers("north.sevenkingdoms.local", laps=False)
+        computers_without_laps = mock_ce_client.get_computers("essos.local", laps=False)
         assert len(computers_without_laps) == 1
-        assert "workstation01" in computers_without_laps
+        assert "meereen" in computers_without_laps
+        
+        # Test without LAPS filter (all computers)
+        all_computers = mock_ce_client.get_computers("essos.local", laps=None)
+        assert len(all_computers) == 2
+        assert "braavos" in all_computers
+        assert "meereen" in all_computers
     
     def test_get_computers_empty_response(self, mock_ce_client):
         """Test computer enumeration with empty response"""

@@ -126,12 +126,20 @@ class BloodHoundCEClient(BloodHoundClient):
     def get_computers(self, domain: str, laps: Optional[bool] = None) -> List[str]:
         """Get enabled computers using CySQL query"""
         try:
-            # Use CySQL query to get enabled computers in specific domain
-            cypher_query = f"""
-            MATCH (c:Computer) 
-            WHERE c.enabled = true AND toUpper(c.domain) = '{domain.upper()}'
-            RETURN c
-            """
+            # Build CySQL query with optional LAPS filter
+            if laps is not None:
+                laps_condition = "true" if laps else "false"
+                cypher_query = f"""
+                MATCH (c:Computer) 
+                WHERE c.enabled = true AND c.haslaps = {laps_condition} AND toUpper(c.domain) = '{domain.upper()}'
+                RETURN c
+                """
+            else:
+                cypher_query = f"""
+                MATCH (c:Computer) 
+                WHERE c.enabled = true AND toUpper(c.domain) = '{domain.upper()}'
+                RETURN c
+                """
             
             result = self.execute_query(cypher_query)
             computers = []
@@ -144,12 +152,6 @@ class BloodHoundCEClient(BloodHoundClient):
                         # Extract just the computer name part (before @) if it's in UPN format
                         if "@" in computer_name:
                             computer_name = computer_name.split("@")[0]
-                        
-                        # Filter by LAPS if specified
-                        if laps is not None:
-                            has_laps = node_properties.get('haslaps', False)
-                            if has_laps != laps:
-                                continue
                         
                         computers.append(computer_name.lower())
             

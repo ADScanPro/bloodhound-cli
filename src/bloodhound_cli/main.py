@@ -30,6 +30,26 @@ def load_config():
     return None
 
 
+def output_results(results, output_file=None, verbose=False, result_type="results"):
+    """Output results to console or file"""
+    if output_file:
+        try:
+            with open(output_file, 'w') as f:
+                for result in results:
+                    f.write(f"{result}\n")
+            if verbose:
+                print(f"Results saved to {output_file}")
+        except Exception as e:
+            print(f"Error writing to file {output_file}: {e}")
+            # Fallback to console output
+            for result in results:
+                print(result)
+    else:
+        # Console output
+        for result in results:
+            print(result)
+
+
 def get_client(edition: str, **kwargs):
     """Get BloodHound client based on edition"""
     config = load_config()
@@ -78,6 +98,8 @@ def cmd_users(args):
         print(f"Debug: Creating client for edition {args.edition}")
         print(f"Debug: Domain = {args.domain}")
         print(f"Debug: Password = {args.password}")
+        print(f"Debug: High value filter = {args.high_value}")
+        print(f"Debug: Admin count filter = {args.admin_count}")
     
     client = get_client(
         args.edition,
@@ -94,16 +116,26 @@ def cmd_users(args):
     try:
         if args.debug:
             print(f"Debug: Client created, getting users...")
-        users = client.get_users(args.domain)
+        
+        # Determine which function to call based on parameters
+        if args.high_value:
+            users = client.get_highvalue_users(args.domain)
+            user_type = "high value users"
+        elif args.admin_count:
+            users = client.get_admin_users(args.domain)
+            user_type = "admin users"
+        else:
+            users = client.get_users(args.domain)
+            user_type = "users"
         
         if args.debug:
-            print(f"Debug: Got {len(users)} users")
+            print(f"Debug: Got {len(users)} {user_type}")
         
         if args.verbose:
-            print(f"Found {len(users)} users in domain {args.domain}")
+            print(f"Found {len(users)} {user_type} in domain {args.domain}")
         
-        for user in users:
-            print(user)
+        # Output results to console or file
+        output_results(users, args.output, args.verbose, user_type)
             
     finally:
         client.close()
@@ -124,79 +156,39 @@ def cmd_computers(args):
     )
     
     try:
-        computers = client.get_computers(args.domain, laps=args.laps)
+        # Convert laps string to boolean if provided
+        laps_filter = None
+        if args.laps:
+            laps_filter = args.laps.lower() == 'true'
+        
+        computers = client.get_computers(args.domain, laps=laps_filter)
         
         if args.verbose:
             print(f"Found {len(computers)} computers in domain {args.domain}")
         
-        for computer in computers:
-            print(computer)
+        # Output results to console or file
+        output_results(computers, args.output, args.verbose, "computers")
             
     finally:
         client.close()
 
 
-def cmd_admin_users(args):
-    """List admin users in a domain"""
-    client = get_client(
-        args.edition,
-        uri=args.uri,
-        user=args.user,
-        password=args.password,
-        base_url=args.base_url,
-        username=args.username,
-        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
-        debug=args.debug,
-        verbose=args.verbose
-    )
-    
-    try:
-        admin_users = client.get_admin_users(args.domain)
-        
-        if args.verbose:
-            print(f"Found {len(admin_users)} admin users in domain {args.domain}")
-        
-        for user in admin_users:
-            print(user)
-            
-    finally:
-        client.close()
-
-
-def cmd_highvalue_users(args):
-    """List high value users in a domain"""
-    client = get_client(
-        args.edition,
-        uri=args.uri,
-        user=args.user,
-        password=args.password,
-        base_url=args.base_url,
-        username=args.username,
-        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
-        debug=args.debug,
-        verbose=args.verbose
-    )
-    
-    try:
-        hv_users = client.get_highvalue_users(args.domain)
-        
-        if args.verbose:
-            print(f"Found {len(hv_users)} high value users in domain {args.domain}")
-        
-        for user in hv_users:
-            print(user)
-            
-    finally:
-        client.close()
 
 
 def main():
     """Main CLI entry point"""
+    # Load configuration to get default edition
+    config = load_config()
+    default_edition = 'ce'  # fallback default to CE
+    if config and 'GENERAL' in config and 'edition' in config['GENERAL']:
+        default_edition = config['GENERAL']['edition']
+    
     parser = argparse.ArgumentParser(description='BloodHound CLI')
-    parser.add_argument('--edition', choices=['legacy', 'ce'], default='legacy',
+    parser.add_argument('--edition', choices=['legacy', 'ce'], default=default_edition,
                        help='BloodHound edition to use')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    parser.add_argument('-o', '--output', help='Output file to save results')
     
     # Legacy connection options
     parser.add_argument('--uri', default='bolt://localhost:7687',
@@ -217,23 +209,16 @@ def main():
     # Users command
     users_parser = subparsers.add_parser('user', help='List users')
     users_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
+    users_parser.add_argument('--high-value', action='store_true', help='Show only high value users')
+    users_parser.add_argument('--admin-count', action='store_true', help='Show only admin users')
     users_parser.set_defaults(func=cmd_users)
     
     # Computers command
     computers_parser = subparsers.add_parser('computer', help='List computers')
     computers_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
-    computers_parser.add_argument('--laps', type=bool, help='Filter by LAPS status')
+    computers_parser.add_argument('--laps', choices=['true', 'false'], help='Filter by LAPS status (true/false)')
     computers_parser.set_defaults(func=cmd_computers)
     
-    # Admin users command
-    admin_parser = subparsers.add_parser('admin', help='List admin users')
-    admin_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
-    admin_parser.set_defaults(func=cmd_admin_users)
-    
-    # High value users command
-    hv_parser = subparsers.add_parser('highvalue', help='List high value users')
-    hv_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
-    hv_parser.set_defaults(func=cmd_highvalue_users)
     
     args = parser.parse_args()
     
