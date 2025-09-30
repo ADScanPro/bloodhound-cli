@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # BloodHound CE usando SpecterOps CLI (más simple)
+  bloodhound-ce:
+    image: specterops/bloodhound:latest
+    ports:
+      - "8080:8080"
+      - "7474:7474"  # Neo4j browser
+      - "7687:7687"  # Neo4j bolt
+    environment:
+      - NEO4J_AUTH=neo4j/neo4j
+    volumes:
+      - bloodhound_data:/app/data
+      - ./test-data/goad/:/app/import/
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+
+  # Servicio para cargar datos GOAD usando SpecterOps CLI
+  data-loader:
+    image: specterops/bloodhound:latest
+    depends_on:
+      bloodhound-ce:
+        condition: service_healthy
+    volumes:
+      - ./test-data/goad/:/app/import/
+      - ./scripts/:/scripts/
+    environment:
+      - BLOODHOUND_URL=http://bloodhound-ce:8080
+    command: ["/scripts/load-goad-data-specterops.sh"]
+    restart: "no"
+
+volumes:
+  bloodhound_data:

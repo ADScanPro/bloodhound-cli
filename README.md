@@ -1,209 +1,217 @@
 # bloodhound-cli
 
-**bloodhound-cli** is a Python command-line tool designed to query and manage data from **BloodHound**.
+**bloodhound-cli** is a Python command-line tool designed to query and manage data from **BloodHound** with support for both Legacy (Neo4j) and Community Edition (CE) backends.
 
-- Legacy (Neo4j-backed) is fully supported.
-- Community Edition (CE) is introduced with a pluggable client skeleton so behavior can be incrementally implemented without breaking legacy users.
+## 🏗️ **Modular Architecture**
 
->CE support note: This CLI now includes an early CE client. Many CE features are placeholders. If you need the official SpecterOps CE installer CLI, see their project at `https://github.com/specterOps/bloodHound-cli`.
+The CLI now features a clean, modular architecture that eliminates code duplication and follows best practices:
 
-## Key Features
+```
+src/bloodhound_cli/
+├── core/
+│   ├── base.py          # Abstract base class with common interface
+│   ├── legacy.py        # Neo4j implementation
+│   ├── ce.py           # HTTP API implementation  
+│   └── factory.py      # Factory pattern for client creation
+├── main.py             # CLI entry point
+└── tests/              # Comprehensive test suite
+```
 
-1. **Configuration Management**
-    
-    - Save your Neo4j connection details (host, port, user, and password) to a local configuration file (`~/.bloodhound_config`) using the `set` subcommand.
-    - The configuration file is stored with restricted permissions (`chmod 600`) to protect your sensitive credentials.
-2. **ACL Queries (`acl` subcommand)**
-    
-    - Enumerate ACLs related to a single user by specifying `-u/--user`.
-    - Enumerate cross-domain ACLs for a domain by specifying `-d/--domain`.
-    - Optionally exclude multiple domains with `-bd/--blacklist-domains`.
-3. **Computer Queries (`computer` subcommand)**
-    
-    - Enumerate computers within a specified domain (`-d`).
-    - Optionally save results to a file (`-o`).
-    - Filter by LAPS status (`--laps True/False`).
-4. **User Queries (`user` subcommand)**
+## ✨ **Key Features**
 
-    - Enumerate users within a specified domain (`-d`).
-    - Optionally save results to a file (`-o`).
-    - Use mutually exclusive filters to target specific user attributes:
-        - `--admin-count`: Show only privileged (admin) users.
-        - `--high-value`: Show only high-value users.
-        - `--password-not-required`: Show only users with `passwordnotreqd` enabled.
-        - `--password-never-expires`: Show only users with `pwdneverexpires` enabled.
-5. **Session and Access Queries**
+### 🔄 **Dual Backend Support**
+- **Legacy (Neo4j)**: Full feature set with direct Neo4j queries
+- **Community Edition (CE)**: HTTP API integration with BloodHound CE
 
-    - Query sessions and access path relations in a domain (legacy).
+### 🎯 **Unified Interface**
+- Same commands work with both backends
+- Automatic client selection based on `--edition` flag
+- No code duplication - queries centralized in base classes
 
-6. **Debug and Verbose Output**
+### 🧪 **Comprehensive Testing**
+- Unit tests with mocks for isolated testing
+- Integration tests with real BloodHound CE and GOAD data
+- Docker-based test environment with realistic data
 
-    - Global flags `--debug` and `--verbose` enhance output. When available, output is formatted with `rich`.
+### 🔧 **Advanced Query Support**
+- User enumeration with domain filtering
+- Computer enumeration with LAPS filtering
+- Admin and high-value user detection
+- Password policy analysis
+- Session and access path queries
 
-7. **Secure Credential Storage**
+## 🚀 **Installation**
 
-    - The `set` subcommand saves your Neo4j credentials in a local file (`~/.bloodhound_config`) which is excluded from source control and has strict file permissions.
-
-## Installation
-
-It is recommended to install **bloodhound-cli** using [pipx](https://github.com/pipxproject/pipx) to ensure it runs in an isolated environment. You can install it from PyPI:
-
-```sh
+### Recommended: pipx (isolated environment)
+```bash
 pipx install bloodhound-cli
 ```
 
-Alternatively, you can use pip:
-
-```sh
+### Alternative: pip
+```bash
 pip install bloodhound-cli
 ```
 
-## Usage
+### Development: from source
+```bash
+git clone https://github.com/ADScanPro/bloodhound-cli.git
+cd bloodhound-cli
+pip install -e .
+```
 
-1. **Set Neo4j (Legacy) Configuration**  
+## 📖 **Usage**
 
-    ```sh
-    bloodhound-cli set --host <neo4j_host> --port <neo4j_port> --db-user <neo4j_user> --db-password <neo4j_password>
-    ```
+### **Basic Commands**
 
-2. **Set CE Configuration (optional, early support)**
+#### List Users
+```bash
+# Legacy (Neo4j)
+bloodhound-cli --edition legacy user -d mydomain.local
 
-    (Removed) Use the auth subcommand passing --base-url and credentials instead.
+# Community Edition (CE)  
+bloodhound-cli --edition ce user -d mydomain.local
+```
 
-3. **Authenticate to CE (generate and store token)**
+#### List Computers
+```bash
+# All computers
+bloodhound-cli --edition ce computer -d mydomain.local
 
-    ```sh
-    bloodhound-cli --edition ce auth --url http://localhost:7474 --username <user>
-    # It will prompt for the password securely
-    # Optional flags:
-    #   --password <pass>
-    #   --login-path /api/v2/login
-    #   --insecure
-    ```
+# Filter by LAPS
+bloodhound-cli --edition ce computer -d mydomain.local --laps true
+```
 
-4. **Run in a chosen edition**
+#### Admin Users
+```bash
+bloodhound-cli --edition ce admin -d mydomain.local
+```
 
-    - The default edition can be persisted in `~/.bloodhound_config` under `[GENERAL] edition`.
-      Running `set` will store `legacy`; running `auth` will store `ce`.
+#### High Value Users
+```bash
+bloodhound-cli --edition ce highvalue -d mydomain.local
+```
 
-    - To target CE explicitly:
+### **Connection Configuration**
 
-    ```sh
-    bloodhound-cli --edition ce user --domain mydomain.local
-    ```
+#### Legacy (Neo4j)
+```bash
+bloodhound-cli --edition legacy user -d mydomain.local \
+  --uri bolt://localhost:7687 \
+  --user neo4j \
+  --password mypassword
+```
 
-    - Or via env var:
+#### Community Edition (CE)
+```bash
+bloodhound-cli --edition ce user -d mydomain.local \
+  --base-url http://localhost:8080 \
+  --username admin \
+  --ce-password Bloodhound123!
+```
 
-    ```sh
-    BLOODHOUND_EDITION=ce bloodhound-cli user --domain mydomain.local
-    ```
+### **Debug and Verbose Output**
+```bash
+bloodhound-cli --edition ce --debug --verbose user -d mydomain.local
+```
 
-5. **Upload collector artifacts to CE (v2 file-upload flow)**
+## 🧪 **Testing**
 
-    ```sh
-    bloodhound-cli --edition ce upload \
-      -f data1.zip data2.json \
-      --start-path /api/v2/file-upload/start \
-      --upload-path /api/v2/file-upload/{job_id} \
-      --end-path /api/v2/file-upload/{job_id}/end
-    # Optional flags:
-    #   --content-type application/zip|application/json (auto-detected if omitted)
-    #   --insecure
-    ```
+### **Unit Tests**
+```bash
+pytest tests/unit/ -v
+```
 
-6. **Enumerate ACLs**
+### **Integration Tests**
+```bash
+# Requires BloodHound CE running
+pytest tests/integration/ -v
+```
 
-    - **For a single user:**
+### **Full Test Suite with GOAD Data**
+```bash
+# Setup test environment with GOAD data
+./scripts/setup-complete.sh
+./scripts/test-with-goad-domains.sh
+```
 
-        ```sh
-        bloodhound-cli acl --user myuser
-        ```
+## 🏛️ **Architecture Benefits**
 
-    - **For cross-domain:**
+### ✅ **No Code Duplication**
+- Queries defined once in base classes
+- Legacy and CE implementations inherit common interface
+- Changes propagate automatically to both backends
 
-        ```sh
-        bloodhound-cli acl --domain mydomain.local
-        ```
+### ✅ **Easy Extension**
+- Add new queries by implementing abstract methods
+- Factory pattern handles client creation
+- Clean separation of concerns
 
-    - **Exclude multiple domains:**
+### ✅ **Comprehensive Testing**
+- Unit tests with mocks for fast feedback
+- Integration tests with real data
+- Docker-based test environment
 
-        ```sh
-        bloodhound-cli acl --domain mydomain.local -bd EXCLUDED1 EXCLUDED2
-        ```
+### ✅ **Maintainable Code**
+- Clear separation between CLI, core logic, and implementations
+- Type hints and documentation
+- Follows Python best practices
 
-7. **Enumerate Computers**
+## 🔧 **Development**
 
-    - **All computers in a domain:**
+### **Project Structure**
+```
+bloodhound-cli/
+├── src/bloodhound_cli/
+│   ├── core/           # Core business logic
+│   ├── main.py         # CLI entry point
+│   └── __init__.py
+├── tests/              # Test suite
+├── scripts/            # Automation scripts
+└── test-data/          # Test data (GOAD)
+```
 
-        ```sh
-        bloodhound-cli computer --domain mydomain.local
-        ```
+### **Adding New Queries**
+1. Add method to `BloodHoundClient` base class
+2. Implement in both `BloodHoundLegacyClient` and `BloodHoundCEClient`
+3. Add CLI command in `main.py`
+4. Create tests in `tests/`
 
-    - **Filter by LAPS and save results:**
+### **Testing Strategy**
+- **Unit Tests**: Mock external dependencies
+- **Integration Tests**: Real BloodHound CE with GOAD data
+- **CI/CD**: Automated testing with Docker
 
-        ```sh
-        bloodhound-cli computer --domain mydomain.local --laps True -o computers_with_laps.txt
-        ```
+## 📊 **Supported Domains (GOAD Test Data)**
 
-8. **Enumerate Users**
+The project includes comprehensive test data from GOAD (Game of Active Directory):
 
-    - **List all users in a domain:**
+- **north.sevenkingdoms.local**: House Stark domain
+- **essos.local**: Daenerys Targaryen domain  
+- **sevenkingdoms.local**: King's Landing domain
 
-        ```sh
-        bloodhound-cli user --domain mydomain.local
-        ```
+## 🎯 **Roadmap**
 
-    - **List privileged (admin) users:**
+- [ ] Complete all Legacy queries for CE
+- [ ] Add more advanced query capabilities
+- [ ] Enhanced error handling and logging
+- [ ] Performance optimizations
+- [ ] Additional test coverage
 
-        ```sh
-        bloodhound-cli user --domain mydomain.local --admin-count
-        ```
-
-    - **List high-value users:**
-
-        ```sh
-        bloodhound-cli user --domain mydomain.local --high-value
-        ```
-
-    - **List users with password not required:**
-
-        ```sh
-        bloodhound-cli user --domain mydomain.local --password-not-required
-        ```
-
-    - **List users with password never expires:**
-
-        ```sh
-        bloodhound-cli user --domain mydomain.local --password-never-expires
-        ```
-
-    - **Save user query results:**
-
-        ```sh
-        bloodhound-cli user --domain mydomain.local --admin-count -o admin_users.txt
-        ```
-
-## Edition Support Details
-
-- `--edition legacy` (default): full feature set (Neo4j backend).
-- `--edition ce`: CE client with support for `auth` (/api/v2/login) y `upload` (flow de file-upload v2). El resto de comandos imprimirán un mensaje hasta estar conectados a CE.
-
-## Changelog
-
-- 1.0.0
-  - Major release with stable API
-  - Remove automatic version bumping workflow
-  - Manual version control for better release management
-  - Enhanced CE support and authentication flow
-  - Improved CLI structure and user experience
-
-- 0.2.0
-  - Add `--edition` and `--verbose` global flags
-  - Add CE configuration `set-ce` and CE client skeleton
-  - Add CE `auth` (JWT via `/api/v2/login`) and `upload` (file-upload `/start`, `/{job_id}`, `/{job_id}/end`)
-  - Integrate `rich` for debug/verbose output
-  - Dependencies: add `requests`, `rich`
-
-## License
+## 📄 **License**
 
 This project is licensed under the MIT License.
+
+## 🤝 **Contributing**
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+## 📞 **Support**
+
+For issues and questions:
+- Create an issue on GitHub
+- Check the test suite for usage examples
+- Review the integration tests for setup guidance
