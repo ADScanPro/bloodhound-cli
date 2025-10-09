@@ -3,11 +3,18 @@
 BloodHound CLI - Modular Architecture
 """
 import os
+import sys
 import argparse
 import configparser
 import getpass
 from typing import List, Dict, Optional
 from pathlib import Path
+
+# Fix imports when running as script directly
+if __name__ == '__main__' and __package__ is None:
+    # Add parent directory to path to allow imports
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = 'bloodhound_cli'
 
 try:
     from rich.console import Console
@@ -272,24 +279,53 @@ def cmd_acl(args):
     )
     
     try:
-        # Use get_critical_aces_by_domain for now (can be enhanced later)
-        aces = client.get_critical_aces_by_domain(
-            args.source_domain, 
-            blacklist=[], 
-            high_value=args.high_value
+        # Use get_critical_aces with all parameters
+        source = args.source or "all"
+        target = args.target or "all"
+        relation = args.relation or "all"
+        
+        aces = client.get_critical_aces(
+            source_domain=args.source_domain,
+            high_value=args.high_value,
+            username=source,
+            target_domain=target,
+            relation=relation
         )
         
+        # Print header similar to old_main.py print_aces
+        value_suffix = " (high-value targets only)" if args.high_value else ""
+        print(f"\nACLs for source: {source}, target: {target}, "
+              f"source domain: {args.source_domain}, target domain: {target}{value_suffix}")
+        print("=" * 80)
+        
+        if not aces:
+            print("No ACLs found for the given parameters")
+            return
+        
         if args.verbose:
-            print(f"Found {len(aces)} critical ACEs in domain {args.source_domain}")
+            print(f"Found {len(aces)} critical ACEs")
         
-        # Format ACEs for output
-        results = []
-        for ace in aces:
-            ace_str = f"{ace['source']} -> {ace['target']} ({ace['relation']})"
-            results.append(ace_str)
-        
-        # Output results to console or file
-        output_results(results, args.output, args.verbose, "ACEs")
+        # Format ACEs for output - detailed format like old_main.py
+        if args.output:
+            # For file output, use simple format
+            results = []
+            for ace in aces:
+                ace_str = f"{ace['source']} -> {ace['target']} ({ace['relation']})"
+                results.append(ace_str)
+            output_results(results, args.output, False, "ACEs")
+        else:
+            # For console output, use detailed format like print_aces
+            for ace in aces:
+                print(f"\nSource: {ace['source']}")
+                print(f"Source Type: {ace.get('sourceType', 'N/A')}")
+                print(f"Source Domain: {ace.get('sourceDomain', 'N/A')}")
+                print(f"Target: {ace['target']}")
+                print(f"Target Type: {ace.get('targetType', 'N/A')}")
+                print(f"Target Domain: {ace.get('targetDomain', 'N/A')}")
+                if 'targetEnabled' in ace and ace['targetEnabled'] == False:
+                    print(f"Target Enabled: {ace['targetEnabled']}")
+                print(f"Relation: {ace['relation']}")
+                print("-" * 80)
             
     finally:
         client.close()

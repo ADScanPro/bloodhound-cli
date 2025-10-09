@@ -77,10 +77,35 @@ class BloodHoundCEClient(BloodHoundClient):
                 "include_properties": True
             }
             
+            # Show query in debug mode
+            if self.debug:
+                try:
+                    from rich.console import Console
+                    from rich.syntax import Syntax
+                    console = Console()
+                    console.print("\n[bold cyan]Debug: Cypher Query[/bold cyan]")
+                    syntax = Syntax(query, "cypher", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                    console.print(f"[bold cyan]Debug: API URL[/bold cyan]: {url}\n")
+                except ImportError:
+                    # Fallback if rich is not available
+                    print("\n" + "="*80)
+                    print("Debug: Cypher Query")
+                    print("="*80)
+                    print(query)
+                    print("="*80)
+                    print(f"Debug: API URL: {url}\n")
+            
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
             
             if response.status_code == 200:
                 data = response.json()
+                
+                if self.debug:
+                    print(f"Debug: Response data keys: {data.keys() if isinstance(data, dict) else 'not a dict'}")
+                    if "data" in data:
+                        print(f"Debug: Data keys: {data['data'].keys() if isinstance(data.get('data'), dict) else 'not a dict'}")
+                
                 # BloodHound CE returns data in a different format
                 if "data" in data and "nodes" in data["data"]:
                     # Convert nodes to list format
@@ -91,10 +116,66 @@ class BloodHoundCEClient(BloodHoundClient):
                     return nodes
                 return []
             else:
+                if self.debug:
+                    print(f"Debug: API returned status code {response.status_code}")
+                    print(f"Debug: Response: {response.text}")
                 return []
                 
-        except Exception:
+        except Exception as e:
+            if self.debug:
+                print(f"Debug: Exception in execute_query: {e}")
+                import traceback
+                traceback.print_exc()
             return []
+    
+    def execute_query_with_relationships(self, query: str) -> Dict:
+        """Execute a Cypher query and return both nodes and edges"""
+        try:
+            url = f"{self.base_url}/api/v2/graphs/cypher"
+            payload = {
+                "query": query,
+                "include_properties": True
+            }
+            
+            # Show query in debug mode
+            if self.debug:
+                try:
+                    from rich.console import Console
+                    from rich.syntax import Syntax
+                    console = Console()
+                    console.print("\n[bold cyan]Debug: Cypher Query (with relationships)[/bold cyan]")
+                    syntax = Syntax(query, "cypher", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                    console.print(f"[bold cyan]Debug: API URL[/bold cyan]: {url}\n")
+                except ImportError:
+                    print("\n" + "="*80)
+                    print("Debug: Cypher Query (with relationships)")
+                    print("="*80)
+                    print(query)
+                    print("="*80)
+                    print(f"Debug: API URL: {url}\n")
+            
+            response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if self.debug:
+                    print(f"Debug: Full response: {data}")
+                
+                return data.get("data", {})
+            else:
+                if self.debug:
+                    print(f"Debug: API returned status code {response.status_code}")
+                    print(f"Debug: Response: {response.text}")
+                return {}
+                
+        except Exception as e:
+            if self.debug:
+                print(f"Debug: Exception in execute_query_with_relationships: {e}")
+                import traceback
+                traceback.print_exc()
+            return {}
     
     def get_users(self, domain: str) -> List[str]:
         """Get enabled users using CySQL query"""
@@ -374,40 +455,134 @@ class BloodHoundCEClient(BloodHoundClient):
     def get_critical_aces(self, source_domain: str, high_value: bool = False, 
                          username: str = "all", target_domain: str = "all", 
                          relation: str = "all") -> List[Dict]:
-        """Get critical ACEs using CySQL query"""
+        """Get critical ACEs using simplified Cypher query compatible with BloodHound CE"""
         try:
-            cypher_query = f"""
-            MATCH (s)-[r]->(t)
-            WHERE toUpper(s.domain) = '{source_domain.upper()}'
-            RETURN s, r, t
-            """
+            # BloodHound CE doesn't support CASE or UNION, so we need simpler queries
+            # We'll run two separate queries and combine results
             
-            result = self.execute_query(cypher_query)
             aces = []
             
-            if result and isinstance(result, list):
-                for node_properties in result:
-                    source_name = node_properties.get('name', '')
-                    target_name = node_properties.get('name', '')
-                    relation_type = node_properties.get('relation', '')
-                    
-                    if source_name and target_name:
-                        # Extract just the name part (before @) if it's in UPN format
-                        if "@" in source_name:
-                            source_name = source_name.split("@")[0]
-                        if "@" in target_name:
-                            target_name = target_name.split("@")[0]
-                        
-                        aces.append({
-                            "source": source_name,
-                            "relation": relation_type,
-                            "target": target_name
-                        })
+            # Build filters
+            username_filter = ""
+            if username.lower() != "all":
+                username_filter = f" AND toLower(n.samaccountname) = toLower('{username}')"
             
-            return aces
+            target_domain_filter = ""
+            if target_domain.lower() != "all" and target_domain.lower() != "high-value":
+                target_domain_filter = f" AND toLower(m.domain) = toLower('{target_domain}')"
+            
+            high_value_filter = ""
+            if high_value:
+                high_value_filter = " AND m.highvalue = true"
+            
+            relation_filter = ""
+            if relation.lower() != "all":
+                relation_filter = f":{relation}"
+            
+            # Query 1: Direct ACE relationships
+            cypher_query1 = f"""
+            MATCH (n)-[r{relation_filter}]->(m)
+            WHERE r.isacl = true
+              AND toLower(n.domain) = toLower('{source_domain}')
+              {username_filter}
+              {target_domain_filter}
+              {high_value_filter}
+            RETURN n, m, r
+            LIMIT 1000
+            """
+            
+            result1 = self.execute_query_with_relationships(cypher_query1)
+            if result1:
+                aces.extend(self._process_ace_results_from_graph(result1))
+            
+            # Query 2: ACEs through group membership
+            cypher_query2 = f"""
+            MATCH (n)-[:MemberOf*1..]->(g:Group)-[r{relation_filter}]->(m)
+            WHERE r.isacl = true
+              AND toLower(n.domain) = toLower('{source_domain}')
+              {username_filter}
+              {target_domain_filter}
+              {high_value_filter}
+            RETURN n, m, r
+            LIMIT 1000
+            """
+            
+            result2 = self.execute_query_with_relationships(cypher_query2)
+            if result2:
+                aces.extend(self._process_ace_results_from_graph(result2))
+            
+            # Remove duplicates based on source, target, and relation
+            unique_aces = []
+            seen = set()
+            for ace in aces:
+                key = (ace['source'], ace['target'], ace['relation'])
+                if key not in seen:
+                    seen.add(key)
+                    unique_aces.append(ace)
+            
+            return unique_aces
 
-        except Exception:
+        except Exception as e:
+            if self.debug:
+                print(f"Debug: Exception in get_critical_aces: {e}")
+                import traceback
+                traceback.print_exc()
             return []
+    
+    def _process_ace_results_from_graph(self, graph_data: Dict) -> List[Dict]:
+        """Process ACE query results from BloodHound CE graph format"""
+        aces = []
+        
+        nodes = graph_data.get('nodes', {})
+        edges = graph_data.get('edges', [])  # edges is a list, not dict
+        
+        if self.debug:
+            print(f"Debug: Processing {len(nodes)} nodes and {len(edges)} edges")
+        
+        # Process each edge (relationship) - edges is a list
+        for edge_data in edges:
+            source_id = str(edge_data.get('source'))  # Convert to string for dict lookup
+            target_id = str(edge_data.get('target'))  # Convert to string for dict lookup
+            edge_props = edge_data.get('properties', {})
+            edge_label = edge_data.get('label', 'Unknown')
+            
+            # Get source and target node data
+            source_node = nodes.get(source_id, {})
+            target_node = nodes.get(target_id, {})
+            
+            source_props = source_node.get('properties', {})
+            target_props = target_node.get('properties', {})
+            
+            # Extract source info
+            source_name = source_props.get('samaccountname') or source_props.get('name', '')
+            source_domain = source_props.get('domain', 'N/A')
+            source_kind = source_node.get('kind', 'Unknown')
+            
+            # Extract target info  
+            target_name = target_props.get('samaccountname') or target_props.get('name', '')
+            target_domain = target_props.get('domain', 'N/A')
+            target_enabled = target_props.get('enabled', True)
+            target_kind = target_node.get('kind', 'Unknown')
+            
+            if source_name and target_name:
+                # Extract just the name part (before @) if it's in UPN format
+                if "@" in source_name:
+                    source_name = source_name.split("@")[0]
+                if "@" in target_name:
+                    target_name = target_name.split("@")[0]
+                
+                aces.append({
+                    "source": source_name,
+                    "sourceType": source_kind,
+                    "target": target_name,
+                    "targetType": target_kind,
+                    "relation": edge_label,
+                    "sourceDomain": source_domain.lower() if source_domain != 'N/A' else 'N/A',
+                    "targetDomain": target_domain.lower() if target_domain != 'N/A' else 'N/A',
+                    "targetEnabled": target_enabled
+                })
+        
+        return aces
     
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
         """Get access paths using CySQL query - adapted from old_main.py"""

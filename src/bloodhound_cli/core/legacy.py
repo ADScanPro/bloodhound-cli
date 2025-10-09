@@ -18,8 +18,34 @@ class BloodHoundLegacyClient(BloodHoundClient):
     
     def execute_query(self, query: str, **params) -> List[Dict]:
         """Execute a Cypher query"""
+        # Show query in debug mode
+        if self.debug:
+            try:
+                from rich.console import Console
+                from rich.syntax import Syntax
+                console = Console()
+                console.print("\n[bold cyan]Debug: Cypher Query[/bold cyan]")
+                syntax = Syntax(query, "cypher", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                if params:
+                    console.print(f"[bold cyan]Debug: Query Parameters[/bold cyan]: {params}\n")
+            except ImportError:
+                # Fallback if rich is not available
+                print("\n" + "="*80)
+                print("Debug: Cypher Query")
+                print("="*80)
+                print(query)
+                if params:
+                    print(f"Debug: Query Parameters: {params}")
+                print("="*80 + "\n")
+        
         with self.driver.session() as session:
-            return session.run(query, **params).data()
+            result = session.run(query, **params).data()
+            
+            if self.debug:
+                print(f"Debug: Query returned {len(result)} records")
+            
+            return result
     
     def get_users(self, domain: str) -> List[str]:
         query = """
