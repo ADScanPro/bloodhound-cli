@@ -72,29 +72,26 @@ class BloodHoundCEClient(BloodHoundClient):
         """Execute a Cypher query using BloodHound CE API"""
         try:
             url = f"{self.base_url}/api/v2/graphs/cypher"
+            
+            # Clean up query: normalize whitespace but preserve structure
+            # Using split() + join() preserves all non-whitespace characters
+            cleaned_query = ' '.join(query.split())
+            
             payload = {
-                "query": query,
+                "query": cleaned_query,
                 "include_properties": True
             }
             
-            # Show query in debug mode
+            # Show query in debug mode - use plain text to avoid rendering issues
             if self.debug:
-                try:
-                    from rich.console import Console
-                    from rich.syntax import Syntax
-                    console = Console()
-                    console.print("\n[bold cyan]Debug: Cypher Query[/bold cyan]")
-                    syntax = Syntax(query, "cypher", theme="monokai", line_numbers=False)
-                    console.print(syntax)
-                    console.print(f"[bold cyan]Debug: API URL[/bold cyan]: {url}\n")
-                except ImportError:
-                    # Fallback if rich is not available
-                    print("\n" + "="*80)
-                    print("Debug: Cypher Query")
-                    print("="*80)
-                    print(query)
-                    print("="*80)
-                    print(f"Debug: API URL: {url}\n")
+                print("\n" + "="*80)
+                print("Debug: Cypher Query")
+                print("="*80)
+                print(query)
+                print("="*80)
+                print(f"Debug: Cleaned Query: {cleaned_query}")
+                print(f"Debug: API URL: {url}")
+                print("="*80 + "\n")
             
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
             
@@ -132,30 +129,33 @@ class BloodHoundCEClient(BloodHoundClient):
         """Execute a Cypher query and return both nodes and edges"""
         try:
             url = f"{self.base_url}/api/v2/graphs/cypher"
+            
+            # Clean up query: normalize whitespace but preserve structure
+            # Using split() + join() preserves all non-whitespace characters
+            cleaned_query = ' '.join(query.split())
+            
             payload = {
-                "query": query,
+                "query": cleaned_query,
                 "include_properties": True
             }
             
-            # Show query in debug mode
+            # Show query in debug mode - use plain text to avoid rendering issues
             if self.debug:
-                try:
-                    from rich.console import Console
-                    from rich.syntax import Syntax
-                    console = Console()
-                    console.print("\n[bold cyan]Debug: Cypher Query (with relationships)[/bold cyan]")
-                    syntax = Syntax(query, "cypher", theme="monokai", line_numbers=False)
-                    console.print(syntax)
-                    console.print(f"[bold cyan]Debug: API URL[/bold cyan]: {url}\n")
-                except ImportError:
-                    print("\n" + "="*80)
-                    print("Debug: Cypher Query (with relationships)")
-                    print("="*80)
-                    print(query)
-                    print("="*80)
-                    print(f"Debug: API URL: {url}\n")
+                print("\n" + "="*80)
+                print("Debug: Cypher Query (with relationships)")
+                print("="*80)
+                print(query)
+                print("="*80)
+                print(f"Debug: Cleaned Query: {cleaned_query}")
+                print(f"Debug: API URL: {url}")
+                print(f"Debug: Auth Token: {'Set' if self.api_token else 'Not set'}")
+                print("="*80 + "\n")
             
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+            
+            if self.debug:
+                print(f"Debug: Response status code: {response.status_code}")
+                print(f"Debug: Response headers: {dict(response.headers)}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -168,6 +168,11 @@ class BloodHoundCEClient(BloodHoundClient):
                 if self.debug:
                     print(f"Debug: API returned status code {response.status_code}")
                     print(f"Debug: Response: {response.text}")
+                    try:
+                        error_json = response.json()
+                        print(f"Debug: Error details: {error_json}")
+                    except:
+                        pass
                 return {}
                 
         except Exception as e:
@@ -275,7 +280,7 @@ class BloodHoundCEClient(BloodHoundClient):
     def get_highvalue_users(self, domain: str) -> List[str]:
         """Get enabled high value users using CySQL query (system_tags approach)"""
         try:
-            # In BloodHound CE, high value users are identified by system_tags = "admin_tier_0"
+            # In BloodHound CE, tier 0 (high value) users are identified by system_tags = "admin_tier_0"
             # This indicates users in critical administrative groups (Domain Admins, etc.)
             cypher_query = f"""
             MATCH (u:User) 
@@ -473,16 +478,16 @@ class BloodHoundCEClient(BloodHoundClient):
             
             high_value_filter = ""
             if high_value:
-                # In BloodHound CE, tier 0 (high value) is identified by system_tags
-                high_value_filter = ' AND m.system_tags = "admin_tier_0"'
+                # In BloodHound CE, tier 0 (high value) is identified by system_tags = "admin_tier_0"
+                high_value_filter = ' AND NOT m.system_tags = "admin_tier_0"'
             
             relation_filter = ""
             if relation.lower() != "all":
                 relation_filter = f":{relation}"
             
-            # Query 1: Direct ACE relationships
-            cypher_query1 = f"""
-            MATCH (n)-[r{relation_filter}]->(m)
+            # Single query using *0.. to include both direct ACEs and through group membership
+            cypher_query = f"""
+            MATCH (n)-[:MemberOf*0..]->(g)-[r{relation_filter}]->(m)
             WHERE r.isacl = true
               AND toLower(n.domain) = toLower('{source_domain}')
               {username_filter}
@@ -492,25 +497,9 @@ class BloodHoundCEClient(BloodHoundClient):
             LIMIT 1000
             """
             
-            result1 = self.execute_query_with_relationships(cypher_query1)
-            if result1:
-                aces.extend(self._process_ace_results_from_graph(result1))
-            
-            # Query 2: ACEs through group membership
-            cypher_query2 = f"""
-            MATCH (n)-[:MemberOf*1..]->(g:Group)-[r{relation_filter}]->(m)
-            WHERE r.isacl = true
-              AND toLower(n.domain) = toLower('{source_domain}')
-              {username_filter}
-              {target_domain_filter}
-              {high_value_filter}
-            RETURN n, m, r
-            LIMIT 1000
-            """
-            
-            result2 = self.execute_query_with_relationships(cypher_query2)
-            if result2:
-                aces.extend(self._process_ace_results_from_graph(result2))
+            result = self.execute_query_with_relationships(cypher_query)
+            if result:
+                aces.extend(self._process_ace_results_from_graph(result))
             
             # Remove duplicates based on source, target, and relation
             unique_aces = []
