@@ -258,13 +258,16 @@ def cmd_sessions(args):
 
 def cmd_acl(args):
     """List critical ACEs"""
+    # Determine if high-value filter is requested via -t high-value
+    high_value = args.target and args.target.lower() == "high-value"
+    
     if args.debug:
         print(f"Debug: Creating client for edition {args.edition}")
         print(f"Debug: Source domain = {args.source_domain}")
         print(f"Debug: Source = {args.source}")
         print(f"Debug: Relation = {args.relation}")
         print(f"Debug: Target = {args.target}")
-        print(f"Debug: High value = {args.high_value}")
+        print(f"Debug: High value (from -t) = {high_value}")
     
     client = get_client(
         args.edition,
@@ -284,16 +287,20 @@ def cmd_acl(args):
         target = args.target or "all"
         relation = args.relation or "all"
         
+        # If target is "high-value", set it to "all" and use high_value flag
+        if target.lower() == "high-value":
+            target = "all"
+        
         aces = client.get_critical_aces(
             source_domain=args.source_domain,
-            high_value=args.high_value,
+            high_value=high_value,
             username=source,
             target_domain=target,
             relation=relation
         )
         
         # Print header similar to old_main.py print_aces
-        value_suffix = " (high-value targets only)" if args.high_value else ""
+        value_suffix = " (high-value targets only)" if high_value else ""
         print(f"\nACLs for source: {source}, target: {target}, "
               f"source domain: {args.source_domain}, target domain: {target}{value_suffix}")
         print("=" * 80)
@@ -598,8 +605,7 @@ def main():
     acl_parser.add_argument('-s', '--source', help='Source username to filter by')
     acl_parser.add_argument('-sd', '--source-domain', required=True, help='Source domain to query')
     acl_parser.add_argument('-r', '--relation', help='Relation type to filter by')
-    acl_parser.add_argument('-t', '--target', help='Target to filter by (e.g., high-value)')
-    acl_parser.add_argument('--high-value', action='store_true', help='Show only high value targets')
+    acl_parser.add_argument('-t', '--target', help='Target to filter by (use "high-value" for tier 0 targets only)')
     acl_parser.set_defaults(func=cmd_acl)
     
     # Access command

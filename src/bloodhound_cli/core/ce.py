@@ -473,7 +473,8 @@ class BloodHoundCEClient(BloodHoundClient):
             
             high_value_filter = ""
             if high_value:
-                high_value_filter = " AND m.highvalue = true"
+                # In BloodHound CE, tier 0 (high value) is identified by system_tags
+                high_value_filter = ' AND m.system_tags = "admin_tier_0"'
             
             relation_filter = ""
             if relation.lower() != "all":
