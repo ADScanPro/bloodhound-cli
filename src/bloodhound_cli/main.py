@@ -377,6 +377,65 @@ def cmd_upload(args):
         client.close()
 
 
+def cmd_access(args):
+    """Find access paths between objects"""
+    if args.debug:
+        print(f"Debug: Creating client for edition {args.edition}")
+        print(f"Debug: Source = {args.source}")
+        print(f"Debug: Target = {args.target}")
+        print(f"Debug: Domain = {args.domain}")
+        print(f"Debug: Relation = {args.relation}")
+    
+    client = get_client(
+        args.edition,
+        uri=args.uri,
+        user=args.user,
+        password=args.password,
+        base_url=args.base_url,
+        username=args.username,
+        ce_password=getattr(args, 'ce_password', 'Bloodhound123!'),
+        debug=args.debug,
+        verbose=args.verbose
+    )
+    
+    try:
+        paths = client.get_access_paths(
+            source=args.source,
+            connection=args.relation or "all",
+            target=args.target,
+            domain=args.domain
+        )
+        
+        if args.verbose:
+            print(f"\nAccess paths for source: {args.source}, connection: {args.relation or 'all'}, target: {args.target}, domain: {args.domain}")
+            print("=" * 80)
+        
+        if not paths:
+            if args.verbose:
+                print("No access paths found")
+            else:
+                print("No access paths found")
+            return
+        
+        # Format paths for output
+        results = []
+        for path in paths:
+            if args.verbose:
+                print(f"\nSource: {path['source']}")
+                print(f"Target: {path['target']}")
+                print(f"Relation: {path['relation']}")
+                print(f"Path: {path['path']}")
+                print("-" * 40)
+            else:
+                results.append(path['path'])
+        
+        if not args.verbose:
+            output_results(results, args.output, False, "access paths")
+            
+    finally:
+        client.close()
+
+
 def cmd_auth(args):
     """Authenticate to BloodHound CE and save API token"""
     import getpass
@@ -506,6 +565,14 @@ def main():
     acl_parser.add_argument('-t', '--target', help='Target to filter by (e.g., high-value)')
     acl_parser.add_argument('--high-value', action='store_true', help='Show only high value targets')
     acl_parser.set_defaults(func=cmd_acl)
+    
+    # Access command
+    access_parser = subparsers.add_parser('access', help='Find access paths between objects')
+    access_parser.add_argument('-s', '--source', required=True, help='Source object name')
+    access_parser.add_argument('-r', '--relation', help='Relation type to filter by')
+    access_parser.add_argument('-t', '--target', required=True, help='Target object name')
+    access_parser.add_argument('-d', '--domain', required=True, help='Domain to query')
+    access_parser.set_defaults(func=cmd_access)
     
     # Upload command
     upload_parser = subparsers.add_parser('upload', help='Upload BloodHound data')

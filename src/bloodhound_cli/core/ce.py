@@ -410,28 +410,167 @@ class BloodHoundCEClient(BloodHoundClient):
             return []
     
     def get_access_paths(self, source: str, connection: str, target: str, domain: str) -> List[Dict]:
-        """Get access paths using CySQL query"""
+        """Get access paths using CySQL query - adapted from old_main.py"""
         try:
-            cypher_query = f"""
-            MATCH path = (s)-[*1..10]->(t)
-            WHERE s.name = '{source}' AND t.name = '{target}'
-            RETURN path
-            """
+            # Determine relationship conditions
+            if connection.lower() == "all":
+                rel_condition = "AND type(r) IN ['AdminTo','CanRDP','CanPSRemote']"
+                rel_pattern = "[r]->"
+            else:
+                rel_condition = ""
+                rel_pattern = f"[r:{connection}]->"
+            
+            # Case 1: source != "all" and target == "all" - find what source can access
+            if source.lower() != "all" and target.lower() == "all":
+                cypher_query = f"""
+                MATCH p = (n)-{rel_pattern}(m)
+                WHERE toLower(n.samaccountname) = toLower('{source}')
+                AND toLower(n.domain) = toLower('{domain}')
+                AND m.enabled = true
+                {rel_condition}
+                RETURN n.samaccountname AS source, m.samaccountname AS target, type(r) AS relation
+                """
+            
+            # Case 2: source == "all" and target == "all" - find all access paths in domain
+            elif source.lower() == "all" and target.lower() == "all":
+                cypher_query = f"""
+                MATCH p = (n)-{rel_pattern}(m)
+                WHERE toLower(n.domain) = toLower('{domain}')
+                AND n.enabled = true
+                AND m.enabled = true
+                {rel_condition}
+                RETURN n.samaccountname AS source, m.samaccountname AS target, type(r) AS relation
+                """
+            
+            # Case 3: source != "all" and target == "dcs" - find users with DC access
+            elif source.lower() != "all" and target.lower() == "dcs":
+                cypher_query = f"""
+                MATCH p = (n)-{rel_pattern}(m)
+                WHERE toLower(n.samaccountname) = toLower('{source}')
+                AND toLower(n.domain) = toLower('{domain}')
+                AND m.enabled = true
+                AND (m.operatingsystem CONTAINS 'Windows Server' OR m.operatingsystem CONTAINS 'Domain Controller')
+                {rel_condition}
+                RETURN n.samaccountname AS source, m.samaccountname AS target, type(r) AS relation
+                """
+            
+            # Case 4: source == "all" and target == "dcs" - find all users with DC access
+            elif source.lower() == "all" and target.lower() == "dcs":
+                cypher_query = f"""
+                MATCH p = (n)-{rel_pattern}(m)
+                WHERE toLower(n.domain) = toLower('{domain}')
+                AND n.enabled = true
+                AND m.enabled = true
+                AND (m.operatingsystem CONTAINS 'Windows Server' OR m.operatingsystem CONTAINS 'Domain Controller')
+                {rel_condition}
+                RETURN n.samaccountname AS source, m.samaccountname AS target, type(r) AS relation
+                """
+            
+            # Case 5: specific source to specific target
+            else:
+                cypher_query = f"""
+                MATCH p = (n)-{rel_pattern}(m)
+                WHERE toLower(n.samaccountname) = toLower('{source}')
+                AND toLower(n.domain) = toLower('{domain}')
+                AND toLower(m.samaccountname) = toLower('{target}')
+                AND m.enabled = true
+                {rel_condition}
+                RETURN n.samaccountname AS source, m.samaccountname AS target, type(r) AS relation
+                """
             
             result = self.execute_query(cypher_query)
             paths = []
             
             if result and isinstance(result, list):
-                for path_data in result:
-                    # Process path data - this might need adjustment based on actual CySQL response format
-                    if isinstance(path_data, dict):
+                for record in result:
+                    source_name = record.get('source', '')
+                    target_name = record.get('target', '')
+                    relation = record.get('relation', '')
+                    
+                    if source_name and target_name:
+                        # Extract just the username part (before @) if it's in UPN format
+                        if "@" in source_name:
+                            source_name = source_name.split("@")[0]
+                        if "@" in target_name:
+                            target_name = target_name.split("@")[0]
+                        
                         paths.append({
-                            "source": source,
-                            "target": target,
-                            "path": path_data
+                            "source": source_name,
+                            "target": target_name,
+                            "relation": relation,
+                            "path": f"{source_name} -> {target_name} ({relation})"
                         })
             
             return paths
+
+        except Exception:
+            return []
+    
+    def get_users_with_dc_access(self, domain: str) -> List[Dict]:
+        """Get users who have access to Domain Controllers"""
+        try:
+            # First try to find actual DCs
+            cypher_query = f"""
+            MATCH (u:User)-[r]->(dc:Computer)
+            WHERE u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+              AND dc.enabled = true AND toUpper(dc.domain) = '{domain.upper()}'
+              AND (dc.operatingsystem CONTAINS 'Windows Server' OR dc.operatingsystem CONTAINS 'Domain Controller')
+            RETURN u.samaccountname AS user, dc.name AS dc, type(r) AS relation
+            """
+            
+            result = self.execute_query(cypher_query)
+            users_with_access = []
+            
+            if result and isinstance(result, list):
+                for record in result:
+                    user = record.get('user', '')
+                    dc = record.get('dc', '')
+                    relation = record.get('relation', '')
+                    
+                    if user and dc:
+                        # Extract just the username part (before @) if it's in UPN format
+                        if "@" in user:
+                            user = user.split("@")[0]
+                        if "@" in dc:
+                            dc = dc.split("@")[0]
+                        
+                        users_with_access.append({
+                            "source": user,
+                            "target": dc,
+                            "path": f"{user} -> {dc} ({relation})"
+                        })
+            
+            # If no DCs found, try to find any user-computer relationships
+            if not users_with_access:
+                fallback_query = f"""
+                MATCH (u:User)-[r]->(c:Computer)
+                WHERE u.enabled = true AND toUpper(u.domain) = '{domain.upper()}'
+                  AND c.enabled = true AND toUpper(c.domain) = '{domain.upper()}'
+                RETURN u.samaccountname AS user, c.name AS computer, type(r) AS relation
+                """
+                
+                result = self.execute_query(fallback_query)
+                
+                if result and isinstance(result, list):
+                    for record in result:
+                        user = record.get('user', '')
+                        computer = record.get('computer', '')
+                        relation = record.get('relation', '')
+                        
+                        if user and computer:
+                            # Extract just the username part (before @) if it's in UPN format
+                            if "@" in user:
+                                user = user.split("@")[0]
+                            if "@" in computer:
+                                computer = computer.split("@")[0]
+                            
+                            users_with_access.append({
+                                "source": user,
+                                "target": computer,
+                                "path": f"{user} -> {computer} ({relation})"
+                            })
+            
+            return users_with_access
 
         except Exception:
             return []
