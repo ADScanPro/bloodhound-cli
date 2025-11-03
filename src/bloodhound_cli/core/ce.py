@@ -486,6 +486,7 @@ class BloodHoundCEClient(BloodHoundClient):
                 relation_filter = f":{relation}"
             
             # Single query using *0.. to include both direct ACEs and through group membership
+            # We return n, g, m, r so we can track the original source node (n) even when ACLs are through groups (g)
             cypher_query = f"""
             MATCH (n)-[:MemberOf*0..]->(g)-[r{relation_filter}]->(m)
             WHERE r.isacl = true
@@ -493,13 +494,13 @@ class BloodHoundCEClient(BloodHoundClient):
               {username_filter}
               {target_domain_filter}
               {high_value_filter}
-            RETURN n, m, r
+            RETURN n, g, m, r
             LIMIT 1000
             """
             
             result = self.execute_query_with_relationships(cypher_query)
             if result:
-                aces.extend(self._process_ace_results_from_graph(result))
+                aces.extend(self._process_ace_results_from_graph(result, source_domain, username))
             
             # Remove duplicates based on source, target, and relation
             unique_aces = []
@@ -519,7 +520,7 @@ class BloodHoundCEClient(BloodHoundClient):
                 traceback.print_exc()
             return []
     
-    def _process_ace_results_from_graph(self, graph_data: Dict) -> List[Dict]:
+    def _process_ace_results_from_graph(self, graph_data: Dict, source_domain: str = None, username: str = None) -> List[Dict]:
         """Process ACE query results from BloodHound CE graph format"""
         aces = []
         
@@ -528,6 +529,36 @@ class BloodHoundCEClient(BloodHoundClient):
         
         if self.debug:
             print(f"Debug: Processing {len(nodes)} nodes and {len(edges)} edges")
+        
+        # Find the original source node(s) (n) that match our search criteria
+        # This is needed when ACLs are through groups (even nested groups) and the edge source is the group, not the original node
+        # The query uses [:MemberOf*0..] which is recursive, so it handles nested groups automatically
+        original_source_nodes = []
+        if source_domain:
+            for node_id, node_data in nodes.items():
+                node_props = node_data.get('properties', {})
+                node_kind = node_data.get('kind', '')
+                node_domain = node_props.get('domain', '')
+                
+                # Look for User or Computer (not Group) with matching domain
+                if node_kind in ['User', 'Computer']:
+                    if node_domain and node_domain.upper() == source_domain.upper():
+                        # If username is specified, check if it matches
+                        if username and username.lower() != "all":
+                            node_sam = node_props.get('samaccountname', '')
+                            if node_sam and node_sam.lower() == username.lower():
+                                original_source_nodes.append((node_id, node_data))
+                                if self.debug:
+                                    print(f"Debug: Found original source node: {node_sam} (ID: {node_id})")
+                        else:
+                            # If no specific username, collect all matching User/Computer nodes
+                            node_sam = node_props.get('samaccountname', '') or node_props.get('name', '')
+                            original_source_nodes.append((node_id, node_data))
+                            if self.debug:
+                                print(f"Debug: Found original source node: {node_sam} (ID: {node_id})")
+        
+        if self.debug:
+            print(f"Debug: Found {len(original_source_nodes)} original source node(s)")
         
         # Process each edge (relationship) - edges is a list
         for edge_data in edges:
@@ -540,13 +571,32 @@ class BloodHoundCEClient(BloodHoundClient):
             source_node = nodes.get(source_id, {})
             target_node = nodes.get(target_id, {})
             
-            source_props = source_node.get('properties', {})
+            # If source node is missing or is a Group, use the original source node (n)
+            # This handles both direct groups and nested groups (the query uses [:MemberOf*0..] which is recursive)
+            source_kind = source_node.get('kind', '') if source_node else ''
+            if not source_node or source_kind == 'Group' or source_id not in nodes:
+                # Use the first matching original source node
+                # If username was specified, there should be only one
+                # If username was "all", all edges apply to all matching users
+                if original_source_nodes:
+                    _, original_node = original_source_nodes[0]
+                    source_node = original_node
+                    source_props = original_node.get('properties', {})
+                    source_domain_value = source_props.get('domain', 'N/A')
+                    source_kind = original_node.get('kind', 'Unknown')
+                    if self.debug:
+                        print(f"Debug: Using original source node for edge source_id={source_id} (was group or missing)")
+                else:
+                    source_props = {}
+                    source_domain_value = 'N/A'
+            else:
+                source_props = source_node.get('properties', {})
+                source_domain_value = source_props.get('domain', 'N/A')
+            
             target_props = target_node.get('properties', {})
             
             # Extract source info
             source_name = source_props.get('samaccountname') or source_props.get('name', '')
-            source_domain = source_props.get('domain', 'N/A')
-            source_kind = source_node.get('kind', 'Unknown')
             
             # Extract target info  
             target_name = target_props.get('samaccountname') or target_props.get('name', '')
@@ -567,7 +617,7 @@ class BloodHoundCEClient(BloodHoundClient):
                     "target": target_name,
                     "targetType": target_kind,
                     "relation": edge_label,
-                    "sourceDomain": source_domain.lower() if source_domain != 'N/A' else 'N/A',
+                    "sourceDomain": source_domain_value.lower() if source_domain_value != 'N/A' else 'N/A',
                     "targetDomain": target_domain.lower() if target_domain != 'N/A' else 'N/A',
                     "targetEnabled": target_enabled
                 })
