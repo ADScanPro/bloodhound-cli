@@ -3,7 +3,6 @@ Integration tests for Legacy BloodHound CLI with real Neo4j database
 """
 import pytest
 import os
-from neo4j import GraphDatabase
 from bloodhound_cli.old_main import BloodHoundACEAnalyzer
 
 
@@ -32,7 +31,7 @@ class TestLegacyIntegration:
         """Test user enumeration with real data"""
         users = legacy_client.get_users("TEST.LOCAL")
         
-        # Verificar que obtenemos usuarios esperados
+        # Verify expected users are returned
         assert "admin" in users
         assert "testuser" in users
         assert "service" in users
@@ -42,7 +41,7 @@ class TestLegacyIntegration:
         """Test computer enumeration with real data"""
         computers = legacy_client.get_computers("TEST.LOCAL")
         
-        # Verificar computadoras esperadas
+        # Verify expected computers
         assert "dc01" in [c.lower() for c in computers]
         assert "ws01" in [c.lower() for c in computers]
         assert len(computers) >= 2
@@ -52,7 +51,7 @@ class TestLegacyIntegration:
         computers_with_laps = legacy_client.get_computers("TEST.LOCAL", laps=True)
         computers_without_laps = legacy_client.get_computers("TEST.LOCAL", laps=False)
         
-        # Verificar filtrado por LAPS
+        # Verify LAPS filtering
         assert len(computers_with_laps) >= 1
         assert len(computers_without_laps) >= 1
         assert len(computers_with_laps) + len(computers_without_laps) >= 2
@@ -61,7 +60,7 @@ class TestLegacyIntegration:
         """Test admin user enumeration"""
         admin_users = legacy_client.get_admin_users("TEST.LOCAL")
         
-        # Verificar que admin está en la lista
+        # Verify admin user is present
         assert "admin" in admin_users
         assert len(admin_users) >= 1
     
@@ -69,7 +68,7 @@ class TestLegacyIntegration:
         """Test high-value user enumeration"""
         highvalue_users = legacy_client.get_highvalue_users("TEST.LOCAL")
         
-        # Verificar usuarios de alto valor
+        # Verify high-value users
         assert "admin" in highvalue_users
         assert len(highvalue_users) >= 1
     
@@ -77,7 +76,7 @@ class TestLegacyIntegration:
         """Test password not required users"""
         pwd_not_req_users = legacy_client.get_password_not_required_users("TEST.LOCAL")
         
-        # Verificar usuarios sin contraseña requerida
+        # Verify users without password requirement
         assert "service" in pwd_not_req_users
         assert len(pwd_not_req_users) >= 1
     
@@ -85,7 +84,7 @@ class TestLegacyIntegration:
         """Test password never expires users"""
         pwd_never_exp_users = legacy_client.get_password_never_expires_users("TEST.LOCAL")
         
-        # Verificar usuarios con contraseña que nunca expira
+        # Verify users whose password never expires
         assert "service" in pwd_never_exp_users
         assert len(pwd_never_exp_users) >= 1
     
@@ -99,7 +98,7 @@ class TestLegacyIntegration:
             relation="all"
         )
         
-        # Verificar que obtenemos ACLs
+        # Verify ACL results are returned
         assert len(aces) >= 0  # Puede ser 0 si no hay ACLs directas
     
     def test_get_access_paths(self, legacy_client):
@@ -111,14 +110,14 @@ class TestLegacyIntegration:
             domain="TEST.LOCAL"
         )
         
-        # Verificar que obtenemos rutas de acceso
+        # Verify access paths are returned
         assert isinstance(access_paths, list)
     
     def test_get_sessions(self, legacy_client):
         """Test session enumeration"""
         sessions = legacy_client.get_sessions("TEST.LOCAL", da=False)
         
-        # Verificar sesiones
+        # Verify sessions list
         assert isinstance(sessions, list)
         # Puede ser vacío si no hay sesiones activas
     
@@ -126,18 +125,18 @@ class TestLegacyIntegration:
         """Test domain admin session enumeration"""
         da_sessions = legacy_client.get_sessions("TEST.LOCAL", da=True)
         
-        # Verificar sesiones de administradores de dominio
+        # Verify domain admin sessions list
         assert isinstance(da_sessions, list)
     
     def test_password_last_change(self, legacy_client):
         """Test password last change data"""
         pwd_data = legacy_client.get_password_last_change("TEST.LOCAL")
         
-        # Verificar datos de contraseña
+        # Verify password data list
         assert isinstance(pwd_data, list)
         assert len(pwd_data) >= 3  # Al menos 3 usuarios
         
-        # Verificar estructura de datos
+        # Verify data structure
         for user_data in pwd_data:
             assert "user" in user_data
             assert "password_last_change" in user_data
@@ -147,7 +146,7 @@ class TestLegacyIntegration:
         """Test custom Cypher query execution"""
         query = "MATCH (u:User) WHERE u.domain = 'TEST.LOCAL' RETURN u.samaccountname LIMIT 5"
         
-        # No debería lanzar excepción
+        # Should not raise an exception
         try:
             legacy_client.execute_custom_query(query)
         except Exception as e:
@@ -155,5 +154,5 @@ class TestLegacyIntegration:
     
     def teardown_method(self):
         """Cleanup after each test"""
-        # Cualquier limpieza necesaria
+        # Perform any required cleanup
         pass
