@@ -1,0 +1,23 @@
+alwaysApply: false
+description: "Consult the BloodHound MCP documentation whenever you need BloodHound-specific details."
+examples:
+  applies:
+    - "Before implementing or debugging Cypher queries for BloodHound CE or Legacy."
+    - "When verifying API endpoints, relationship semantics, or query limitations."
+  doesNotApply:
+    - "Generic Python refactors unrelated to BloodHound features."
+---
+# BloodHound MCP Usage
+
+Follow this rule whenever a task involves BloodHound query syntax, API behaviour, or feature constraints.
+
+## Required Actions
+
+- Use the BloodHound MCP knowledge base as the first source of truth for queries, relationship types, API endpoints, and feature support.
+- When in doubt about Cypher syntax, supported constructs, or REST contract details, open the MCP resource and confirm instead of relying on memory.
+- Document relevant findings (query shapes, limitations) in the code comments or README if they influence implementation decisions.
+
+## Additional Notes
+
+- Prefer examples from MCP docs to craft or validate `MATCH`, `WHERE`, and relationship traversal clauses.
+- If information is missing from MCP, call it out explicitly in the response and request clarification or gather manual evidence (e.g. via testing).

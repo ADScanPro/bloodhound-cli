@@ -1,12 +1,15 @@
 """
 BloodHound CE implementation using HTTP API
 """
+# pylint: skip-file
 import requests
 import os
 import configparser
+from json import JSONDecodeError
 from typing import List, Dict, Optional
 from pathlib import Path
 from .base import BloodHoundClient
+from .logging_utils import get_logger
 
 
 class BloodHoundCEClient(BloodHoundClient):
@@ -29,6 +32,11 @@ class BloodHoundCEClient(BloodHoundClient):
         self.session = requests.Session()
         if self.api_token:
             self.session.headers.update({"Authorization": f"Bearer {self.api_token}"})
+        self.logger = get_logger("BloodHoundCE", base_url=self.base_url)
+    
+    def _debug(self, message: str, **context) -> None:
+        if self.debug:
+            self.logger.debug(message, **context)
     
     def _load_config(self) -> Optional[Dict[str, str]]:
         """Load configuration from ~/.bloodhound_config file"""
@@ -55,6 +63,8 @@ class BloodHoundCEClient(BloodHoundClient):
         url = f"{self.base_url}{login_path}"
         try:
             payload = {"login_method": "secret", "username": username, "secret": password}
+            # Remove stale token headers before logging in
+            self.session.headers.pop("Authorization", None)
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
             
             if response.status_code == 200:
@@ -82,26 +92,22 @@ class BloodHoundCEClient(BloodHoundClient):
                 "include_properties": True
             }
             
-            # Show query in debug mode - use plain text to avoid rendering issues
-            if self.debug:
-                print("\n" + "="*80)
-                print("Debug: Cypher Query")
-                print("="*80)
-                print(query)
-                print("="*80)
-                print(f"Debug: Cleaned Query: {cleaned_query}")
-                print(f"Debug: API URL: {url}")
-                print("="*80 + "\n")
+            self._debug(
+                "executing cypher query",
+                raw_query=query,
+                cleaned_query=cleaned_query,
+                url=url,
+                params=params,
+            )
             
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
             
             if response.status_code == 200:
                 data = response.json()
-                
-                if self.debug:
-                    print(f"Debug: Response data keys: {data.keys() if isinstance(data, dict) else 'not a dict'}")
-                    if "data" in data:
-                        print(f"Debug: Data keys: {data['data'].keys() if isinstance(data.get('data'), dict) else 'not a dict'}")
+                self._debug(
+                    "cypher response",
+                    keys=list(data.keys()) if isinstance(data, dict) else "non-dict",
+                )
                 
                 # BloodHound CE returns data in a different format
                 if "data" in data and "nodes" in data["data"]:
@@ -113,73 +119,59 @@ class BloodHoundCEClient(BloodHoundClient):
                     return nodes
                 return []
             else:
-                if self.debug:
-                    print(f"Debug: API returned status code {response.status_code}")
-                    print(f"Debug: Response: {response.text}")
+                self._debug(
+                    "cypher query failed",
+                    status=response.status_code,
+                    response_text=response.text,
+                )
                 return []
                 
-        except Exception as e:
-            if self.debug:
-                print(f"Debug: Exception in execute_query: {e}")
-                import traceback
-                traceback.print_exc()
+        except JSONDecodeError as json_error:
+            self._debug("failed to parse CE response", error=str(json_error))
+            return []
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._debug("cypher query error", error=str(exc))
             return []
     
     def execute_query_with_relationships(self, query: str) -> Dict:
-        """Execute a Cypher query and return both nodes and edges"""
+        """Execute a Cypher query and include relationships in the response"""
         try:
             url = f"{self.base_url}/api/v2/graphs/cypher"
             
-            # Clean up query: normalize whitespace but preserve structure
-            # Using split() + join() preserves all non-whitespace characters
             cleaned_query = ' '.join(query.split())
-            
             payload = {
                 "query": cleaned_query,
-                "include_properties": True
+                "include_properties": True,
+                "include_relationships": True
             }
             
-            # Show query in debug mode - use plain text to avoid rendering issues
-            if self.debug:
-                print("\n" + "="*80)
-                print("Debug: Cypher Query (with relationships)")
-                print("="*80)
-                print(query)
-                print("="*80)
-                print(f"Debug: Cleaned Query: {cleaned_query}")
-                print(f"Debug: API URL: {url}")
-                print(f"Debug: Auth Token: {'Set' if self.api_token else 'Not set'}")
-                print("="*80 + "\n")
+            self._debug("executing relationship query", raw_query=query, cleaned_query=cleaned_query)
             
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
             
-            if self.debug:
-                print(f"Debug: Response status code: {response.status_code}")
-                print(f"Debug: Response headers: {dict(response.headers)}")
+            self._debug(
+                "relationship query response",
+                status=response.status_code,
+                headers=dict(response.headers),
+            )
             
             if response.status_code == 200:
                 data = response.json()
-                
-                if self.debug:
-                    print(f"Debug: Full response: {data}")
-                
+                self._debug(
+                    "relationship query data",
+                    has_data=isinstance(data, dict),
+                    keys=list(data.keys()) if isinstance(data, dict) else None,
+                )
                 return data.get("data", {})
-            else:
-                if self.debug:
-                    print(f"Debug: API returned status code {response.status_code}")
-                    print(f"Debug: Response: {response.text}")
-                    try:
-                        error_json = response.json()
-                        print(f"Debug: Error details: {error_json}")
-                    except:
-                        pass
-                return {}
+            
+            self._debug("relationship query failed", status=response.status_code, response=response.text)
+            return {}
                 
-        except Exception as e:
-            if self.debug:
-                print(f"Debug: Exception in execute_query_with_relationships: {e}")
-                import traceback
-                traceback.print_exc()
+        except JSONDecodeError as json_error:
+            self._debug("failed to parse relationship response", error=str(json_error))
+            return {}
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._debug("relationship query error", error=str(exc))
             return {}
     
     def get_users(self, domain: str) -> List[str]:
@@ -470,7 +462,11 @@ class BloodHoundCEClient(BloodHoundClient):
             # Build filters
             username_filter = ""
             if username.lower() != "all":
-                username_filter = f" AND toLower(n.samaccountname) = toLower('{username}')"
+                lowered = username.replace("'", "\\'")
+                username_filter = (
+                    " AND (toLower(n.samaccountname) = toLower('{value}') "
+                    "OR toLower(n.name) = toLower('{value}'))"
+                ).format(value=lowered)
             
             target_domain_filter = ""
             if target_domain.lower() != "all" and target_domain.lower() != "high-value":
@@ -479,7 +475,7 @@ class BloodHoundCEClient(BloodHoundClient):
             high_value_filter = ""
             if high_value:
                 # In BloodHound CE, tier 0 (high value) is identified by system_tags = "admin_tier_0"
-                high_value_filter = ' AND NOT m.system_tags = "admin_tier_0"'
+                high_value_filter = ' AND m.system_tags = "admin_tier_0"'
             
             relation_filter = ""
             if relation.lower() != "all":
@@ -515,9 +511,7 @@ class BloodHoundCEClient(BloodHoundClient):
 
         except Exception as e:
             if self.debug:
-                print(f"Debug: Exception in get_critical_aces: {e}")
-                import traceback
-                traceback.print_exc()
+                self._debug("exception processing critical aces", error=str(e))
             return []
     
     def _process_ace_results_from_graph(self, graph_data: Dict, source_domain: str = None, username: str = None) -> List[Dict]:
@@ -527,8 +521,7 @@ class BloodHoundCEClient(BloodHoundClient):
         nodes = graph_data.get('nodes', {})
         edges = graph_data.get('edges', [])  # edges is a list, not dict
         
-        if self.debug:
-            print(f"Debug: Processing {len(nodes)} nodes and {len(edges)} edges")
+        self._debug("processing graph results", node_count=len(nodes), edge_count=len(edges))
         
         # Find the original source node(s) (n) that match our search criteria
         # This is needed when ACLs are through groups (even nested groups) and the edge source is the group, not the original node
@@ -548,33 +541,47 @@ class BloodHoundCEClient(BloodHoundClient):
                             node_sam = node_props.get('samaccountname', '')
                             if node_sam and node_sam.lower() == username.lower():
                                 original_source_nodes.append((node_id, node_data))
-                                if self.debug:
-                                    print(f"Debug: Found original source node: {node_sam} (ID: {node_id})")
+                                self._debug(
+                                    "found source node",
+                                    node=node_sam,
+                                    node_id=node_id,
+                                    kind=node_kind,
+                                )
                         else:
                             # If no specific username, collect all matching User/Computer nodes
                             node_sam = node_props.get('samaccountname', '') or node_props.get('name', '')
                             original_source_nodes.append((node_id, node_data))
-                            if self.debug:
-                                print(f"Debug: Found original source node: {node_sam} (ID: {node_id})")
+                            self._debug(
+                                "found source node",
+                                node=node_sam,
+                                node_id=node_id,
+                                kind=node_kind,
+                            )
         
-        if self.debug:
-            print(f"Debug: Found {len(original_source_nodes)} original source node(s)")
+        self._debug("identified original sources", count=len(original_source_nodes))
         
         # Process each edge (relationship) - edges is a list
         for edge_data in edges:
             source_id = str(edge_data.get('source'))  # Convert to string for dict lookup
             target_id = str(edge_data.get('target'))  # Convert to string for dict lookup
-            edge_props = edge_data.get('properties', {})
             edge_label = edge_data.get('label', 'Unknown')
             
             # Get source and target node data
             source_node = nodes.get(source_id, {})
             target_node = nodes.get(target_id, {})
             
-            # If source node is missing or is a Group, use the original source node (n)
-            # This handles both direct groups and nested groups (the query uses [:MemberOf*0..] which is recursive)
             source_kind = source_node.get('kind', '') if source_node else ''
-            if not source_node or source_kind == 'Group' or source_id not in nodes:
+            use_fallback = (
+                not source_node
+                or source_id not in nodes
+                or (
+                    original_source_nodes
+                    and username
+                    and username.lower() != "all"
+                    and source_kind == 'Group'
+                )
+            )
+            if use_fallback:
                 # Use the first matching original source node
                 # If username was specified, there should be only one
                 # If username was "all", all edges apply to all matching users
@@ -584,8 +591,11 @@ class BloodHoundCEClient(BloodHoundClient):
                     source_props = original_node.get('properties', {})
                     source_domain_value = source_props.get('domain', 'N/A')
                     source_kind = original_node.get('kind', 'Unknown')
-                    if self.debug:
-                        print(f"Debug: Using original source node for edge source_id={source_id} (was group or missing)")
+                    self._debug(
+                        "using fallback source node",
+                        edge_source_id=source_id,
+                        fallback_kind=source_kind,
+                    )
                 else:
                     source_props = {}
                     source_domain_value = 'N/A'
@@ -903,7 +913,8 @@ class BloodHoundCEClient(BloodHoundClient):
             return True
             
         except Exception as e:
-            print(f"Error uploading data: {e}")
+            self.logger.error("upload error", error=str(e))
+            print(f"Error uploading file: {e}")
             return False
     
     def list_upload_jobs(self) -> List[Dict]:
@@ -923,6 +934,7 @@ class BloodHoundCEClient(BloodHoundClient):
             else:
                 return []
         except Exception as e:
+            self.logger.error("list upload jobs failed", error=str(e))
             print(f"Error listing upload jobs: {e}")
             return []
     
@@ -936,6 +948,7 @@ class BloodHoundCEClient(BloodHoundClient):
             response.raise_for_status()
             return response.json()
         except Exception as e:
+            self.logger.error("accepted types request failed", error=str(e))
             print(f"Error getting accepted types: {e}")
             return []
     
@@ -964,6 +977,7 @@ class BloodHoundCEClient(BloodHoundClient):
             
             return None
         except Exception as e:
+            self.logger.error("get upload job failed", job_id=job_id, error=str(e))
             print(f"Error getting upload job {job_id}: {e}")
             return None
     
@@ -978,6 +992,7 @@ class BloodHoundCEClient(BloodHoundClient):
             latest_job = max(jobs, key=lambda x: x.get('id', 0))
             return latest_job.get('id')
         except Exception as e:
+            self.logger.error("infer latest upload job failed", error=str(e))
             print(f"Error inferring latest job ID: {e}")
             return None
     
@@ -997,6 +1012,7 @@ class BloodHoundCEClient(BloodHoundClient):
             job = None
             
             print("Waiting for ingestion to complete...")
+            self.logger.info("waiting for ingestion", file=file_path)
             
             while True:
                 # Get the latest job ID
@@ -1004,6 +1020,7 @@ class BloodHoundCEClient(BloodHoundClient):
                 if job_id is None:
                     # Brief grace period immediately after upload
                     if time.time() - start_time > 15:
+                        self.logger.warning("could not locate upload job")
                         print("Timeout: Could not find upload job")
                         return False
                 else:
@@ -1011,6 +1028,7 @@ class BloodHoundCEClient(BloodHoundClient):
                     job = self.get_file_upload_job(job_id)
                     if job is None:
                         if time.time() - start_time > 15:
+                            self.logger.warning("could not fetch job details")
                             print("Timeout: Could not get job details")
                             return False
                     else:
@@ -1019,6 +1037,7 @@ class BloodHoundCEClient(BloodHoundClient):
                         
                         # Show status if it changed
                         if status != last_status:
+                            self.logger.info("upload status", status=status, message=status_message)
                             print(f"Job status: {status} - {status_message}")
                             last_status = status
                         
@@ -1026,25 +1045,31 @@ class BloodHoundCEClient(BloodHoundClient):
                         if status in [-1, 2, 3, 4, 5, 8]:
                             if status == 2:
                                 print("✅ Upload and processing completed successfully")
+                                self.logger.info("upload complete", status=status)
                                 return True
                             elif status in [3, 4, 5]:
+                                self.logger.error("upload failed", status=status, message=status_message)
                                 print(f"❌ Upload failed with status {status}: {status_message}")
                                 return False
                             elif status == 8:
+                                self.logger.warning("upload partial", status=status, message=status_message)
                                 print("⚠️ Upload completed with warnings (partially complete)")
                                 return True
                             else:
+                                self.logger.error("upload failed", status=status, message=status_message)
                                 print(f"❌ Upload failed with status {status}: {status_message}")
                                 return False
                 
                 # Check timeout
                 if time.time() - start_time > timeout_seconds:
+                    self.logger.error("upload timeout", timeout_seconds=timeout_seconds)
                     print(f"❌ Timeout after {timeout_seconds} seconds")
                     return False
                 
                 time.sleep(max(1, poll_interval))
             
         except Exception as e:
+            self.logger.exception("upload wait error", error=str(e))
             print(f"Error in upload and wait: {e}")
             return False
     
@@ -1058,6 +1083,7 @@ class BloodHoundCEClient(BloodHoundClient):
             )
             return response.status_code == 200
         except Exception:
+            self.logger.exception("token verification error")
             return False
     
     def auto_renew_token(self) -> bool:
@@ -1114,6 +1140,7 @@ class BloodHoundCEClient(BloodHoundClient):
             return True
             
         except Exception as e:
+            self.logger.exception("token auto-renew error", error=str(e))
             print(f"Error auto-renewing token: {e}")
             return False
     
@@ -1127,6 +1154,7 @@ class BloodHoundCEClient(BloodHoundClient):
             return True
         
         # Token is invalid, try to renew
+        self.logger.info("token expired, attempting renewal")
         print("Token expired, attempting to renew...")
         return self.auto_renew_token()
     

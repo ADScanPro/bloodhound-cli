@@ -1,0 +1,11 @@
+---
+description: Apply when implementing or refactoring Python code to keep typing, docs, tests, and style consistent.
+alwaysApply: false
+---
+- Add type annotations, including return types, to each new or modified function or method.
+- Write docstrings that follow PEP 257 for public modules, classes, and functions; update them whenever behaviour changes.
+- Preserve existing comments unless they are incorrect; improve clarity rather than deleting context.
+- Use pytest under `tests/` for all automated tests; avoid introducing unittest-based suites.
+- Add brief docstrings to tests to describe the scenario and annotate fixtures or helper functions when their types are not obvious.
+- Import pytest typing helpers under a `TYPE_CHECKING` block when necessary (e.g., `from _pytest.monkeypatch import MonkeyPatch`).
+- Enforce style with `uv run ruff check` and format using `uv run ruff format` (or Black if configured) before opening a PR.

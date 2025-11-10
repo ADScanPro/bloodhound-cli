@@ -2,8 +2,7 @@
 Test configuration and fixtures for BloodHound CLI
 """
 import pytest
-from unittest.mock import Mock, MagicMock
-from typing import Dict, List, Any
+from unittest.mock import Mock
 
 
 @pytest.fixture

@@ -42,6 +42,8 @@ src/bloodhound_cli/
 
 ## 🚀 **Installation**
 
+> The CLI and development tooling require Python **3.9 or newer**.
+
 ### Recommended: pipx (isolated environment)
 ```bash
 pipx install bloodhound-cli
@@ -56,8 +58,11 @@ pip install bloodhound-cli
 ```bash
 git clone https://github.com/ADScanPro/bloodhound-cli.git
 cd bloodhound-cli
-pip install -e .
+uv pip install -e .[dev]
 ```
+
+> The `.[dev]` extra installs linting and testing tooling (`ruff`, `pylint`, `pytest`). Use `uv` for all dependency management to keep environments reproducible.
+> Version control the generated `uv.lock` so anyone cloning the repo can run `uv pip sync` and get the exact same dependency set.
 
 ## 📖 **Usage**
 
@@ -188,6 +193,10 @@ The project includes comprehensive test data from GOAD (Game of Active Directory
 - **north.sevenkingdoms.local**: House Stark domain
 - **essos.local**: Daenerys Targaryen domain  
 - **sevenkingdoms.local**: King's Landing domain
+
+## ⚠️ **Legacy Edition Status**
+
+The legacy Neo4j edition is kept for archival purposes only and no longer receives active development. We strongly recommend using the BloodHound Community Edition (CE) client, which is the maintained and tested path in this CLI.
 
 ## 🎯 **Roadmap**
 

@@ -1,0 +1,7 @@
+---
+description: Apply when creating or reorganising files so the project keeps source, tests, docs, and config separated.
+alwaysApply: false
+---
+- Keep runtime code under `src/bloodhound_cli/`, tests under `tests/`, documentation under `docs/`, and configuration under `.cursor/` or `config/`.
+- When introducing a new module, add matching tests in `tests/` and update package `__init__.py` files to expose public APIs intentionally.
+- Avoid placing executable scripts in the project root; add them to `scripts/` with an explanatory README entry.

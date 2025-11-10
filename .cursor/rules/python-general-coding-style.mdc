@@ -1,0 +1,11 @@
+---
+description: Apply to Python source files under `src/` when enforcing indentation, line length, and commenting style.
+alwaysApply: false
+---
+- Prefer standalone functions for stateless helpers; introduce classes only when encapsulating state or behaviour.
+- Enforce code style consistency using `uv run ruff check --fix`.
+- Enable Ruff's `--unsafe-fixes` only after reviewing the diff.
+- Indent using 4 spaces.
+- Keep lines ≤ 120 characters unless readability would suffer.
+- Use `#` for single-line comments and triple double quotes (`"""`) for docstrings; reserve block comments for multi-line explanations.
+- When adding comments, explain intent or edge cases rather than paraphrasing the code.

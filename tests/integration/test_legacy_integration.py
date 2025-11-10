@@ -3,7 +3,8 @@ Integration tests for Legacy BloodHound CLI with real Neo4j database
 """
 import pytest
 import os
-from bloodhound_cli.main import BloodHoundACEAnalyzer
+from neo4j import GraphDatabase
+from bloodhound_cli.old_main import BloodHoundACEAnalyzer
 
 
 @pytest.mark.integration
@@ -13,17 +14,19 @@ class TestLegacyIntegration:
     @pytest.fixture
     def legacy_client(self):
         """Create client with test database connection"""
-        neo4j_uri = os.getenv("BLOODHOUND_NEO4J_URI", "bolt://localhost:7687")
-        neo4j_user = os.getenv("BLOODHOUND_NEO4J_USER", "admin")
-        neo4j_password = os.getenv("BLOODHOUND_NEO4J_PASSWORD", "Bloodhound123!")
-        
-        return BloodHoundACEAnalyzer(
-            uri=neo4j_uri,
-            user=neo4j_user,
-            password=neo4j_password,
-            debug=True,
-            verbose=True
-        )
+        legacy_uri = os.getenv("BLOODHOUND_LEGACY_URI")
+        legacy_user = os.getenv("BLOODHOUND_LEGACY_USER")
+        legacy_password = os.getenv("BLOODHOUND_LEGACY_PASSWORD")
+
+        if not all([legacy_uri, legacy_user, legacy_password]):
+            pytest.skip("Legacy Neo4j credentials not configured (set BLOODHOUND_LEGACY_* env vars)")
+
+        analyzer = BloodHoundACEAnalyzer(legacy_uri, legacy_user, legacy_password, debug=True, verbose=True)
+        try:
+            analyzer.driver.verify_connectivity()
+        except Exception as exc:  # neo4j.exceptions.Neo4jError or AuthError
+            pytest.skip(f"Legacy Neo4j unavailable or authentication failed: {exc}")
+        return analyzer
     
     def test_get_users(self, legacy_client):
         """Test user enumeration with real data"""

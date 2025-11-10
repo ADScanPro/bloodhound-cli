@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""
-Allow running bloodhound_cli as a module: python -m bloodhound_cli
-"""
+"""Entry point for running ``python -m bloodhound_cli``."""
 from .main import main
 
-if __name__ == '__main__':
+
+def run() -> None:
+    """Invoke the CLI main entry point."""
     main()
 
+
+if __name__ == "__main__":
+    run()

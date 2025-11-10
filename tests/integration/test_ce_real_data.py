@@ -3,7 +3,7 @@ Integration tests for BloodHound CE with real GOAD data
 """
 import pytest
 import os
-from bloodhound_cli.main import BloodHoundCEClient
+from bloodhound_cli.core.ce import BloodHoundCEClient
 
 
 @pytest.mark.integration
@@ -28,6 +28,70 @@ class TestCERealData:
         client.authenticate(ce_user, ce_password)
         return client
     
+    def test_get_critical_aces_missandei(self, ce_client):
+        """Ensure ACLs for missandei in essos.local return expected targets"""
+        aces = ce_client.get_critical_aces(
+            source_domain="essos.local",
+            high_value=False,
+            username="missandei",
+            target_domain="all",
+            relation="all",
+        )
+
+        targets = {(ace["target"], ace["relation"]) for ace in aces}
+        assert ("khal.drogo", "GenericAll") in targets
+        assert ("viserys.targaryen", "GenericWrite") in targets
+
+    def test_get_critical_aces_missandei_high_value(self, ce_client):
+        """High-value filter should exclude missandei ACEs."""
+        aces = ce_client.get_critical_aces(
+            source_domain="essos.local",
+            high_value=True,
+            username="missandei",
+            target_domain="all",
+            relation="all",
+        )
+        assert aces == []
+
+    def test_get_critical_aces_stannis_high_value(self, ce_client):
+        """Stannis high-value ACEs should include KINGSLANDING$."""
+        aces = ce_client.get_critical_aces(
+            source_domain="sevenkingdoms.local",
+            high_value=True,
+            username="stannis.baratheon",
+            target_domain="all",
+            relation="all",
+        )
+        targets = {(ace["target"], ace["relation"]) for ace in aces}
+        assert ("BRAAVOS$", "ReadLAPSPassword") in targets
+        assert ("KINGSLANDING$", "GenericAll") in targets
+
+    def test_get_critical_aces_group_small_council(self, ce_client):
+        """Group Small Council should surface nested ACLs."""
+        aces = ce_client.get_critical_aces(
+            source_domain="sevenkingdoms.local",
+            high_value=False,
+            username="small council",
+            target_domain="all",
+            relation="all",
+        )
+        triples = {(ace["source"], ace["target"], ace["relation"]) for ace in aces}
+        assert ("Spys", "jorah.mormont", "GenericAll") in triples
+        assert ("Spys", "BRAAVOS$", "ReadLAPSPassword") in triples
+        assert ("Small Council", "DragonStone", "AddMember") in triples
+
+    def test_get_critical_aces_group_small_council_high_value(self, ce_client):
+        """High-value filter should retain tier-0 ACEs from Small Council."""
+        aces = ce_client.get_critical_aces(
+            source_domain="sevenkingdoms.local",
+            high_value=True,
+            username="small council",
+            target_domain="all",
+            relation="all",
+        )
+        triples = {(ace["source"], ace["target"], ace["relation"]) for ace in aces}
+        assert triples == {("Spys", "BRAAVOS$", "ReadLAPSPassword")}
+
     def test_get_users_north_sevenkingdoms(self, ce_client):
         """Test get_users with north.sevenkingdoms.local domain"""
         users = ce_client.get_users("north.sevenkingdoms.local")

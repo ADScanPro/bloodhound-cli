@@ -3,8 +3,7 @@ Unit tests for BloodHound CE queries using mocks
 """
 import pytest
 from unittest.mock import Mock, patch
-from src.bloodhound_cli.core.ce import BloodHoundCEClient
-from src.bloodhound_cli.core.factory import create_bloodhound_client
+from bloodhound_cli.core.ce import BloodHoundCEClient
 
 
 class TestCEQueries:
@@ -674,3 +673,139 @@ class TestCLICommands:
         assert "krbtgt" not in admin_users, "Disabled user krbtgt should not be in admin users"
         assert "vagrant" not in users, "Disabled user vagrant should not be in regular users"
         assert "vagrant" not in admin_users, "Disabled user vagrant should not be in admin users"
+
+    @pytest.fixture
+    def mock_ce_client_graph(self):
+        client = BloodHoundCEClient(
+            base_url="http://localhost:8080",
+            debug=False,
+            verbose=False
+        )
+        client.logger = Mock()
+        client._debug = Mock()
+        return client
+
+    def test_get_critical_aces_processes_graph(self, mock_ce_client_graph):
+        nodes = {
+            "100": {
+                "properties": {"samaccountname": "alice", "domain": "ESSOS.LOCAL"},
+                "kind": "User",
+            },
+            "200": {
+                "properties": {"samaccountname": "acl_group", "domain": "ESSOS.LOCAL"},
+                "kind": "Group",
+            },
+            "300": {
+                "properties": {
+                    "samaccountname": "server$",
+                    "domain": "ESSOS.LOCAL",
+                    "enabled": False,
+                },
+                "kind": "Computer",
+            },
+        }
+        edges = [{"source": "200", "target": "300", "label": "GenericAll", "properties": {}}]
+        mock_ce_client_graph.execute_query_with_relationships = Mock(return_value={
+            "nodes": nodes,
+            "edges": edges,
+        })
+
+        aces = mock_ce_client_graph.get_critical_aces(
+            source_domain="essos.local",
+            high_value=False,
+            username="alice",
+            target_domain="all",
+            relation="all",
+        )
+
+        assert len(aces) == 1
+        entry = aces[0]
+        assert entry["source"] == "alice"
+        assert entry["target"] == "server$"
+        assert entry["relation"] == "GenericAll"
+        assert entry["targetEnabled"] is False
+
+    def test_get_critical_aces_includes_high_value_filter(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query_with_relationships = Mock(return_value={"nodes": {}, "edges": []})
+        mock_ce_client_graph.get_critical_aces(
+            source_domain="essos.local",
+            high_value=True,
+            username="all",
+            target_domain="all",
+            relation="all",
+        )
+        query = mock_ce_client_graph.execute_query_with_relationships.call_args[0][0]
+        assert 'system_tags = "admin_tier_0"' in query
+        assert "NOT m.system_tags" not in query
+
+    def test_get_critical_aces_username_filter_matches_name(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query_with_relationships = Mock(return_value={"nodes": {}, "edges": []})
+        mock_ce_client_graph.get_critical_aces(
+            source_domain="sevenkingdoms.local",
+            high_value=False,
+            username="small council",
+            target_domain="all",
+            relation="all",
+        )
+        query = mock_ce_client_graph.execute_query_with_relationships.call_args[0][0]
+        assert "toLower(n.samaccountname)" in query
+        assert "toLower(n.name)" in query
+        assert "small council" in query
+
+    def test_get_access_paths_trims_upn(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query = Mock(return_value=[
+            {"source": "user@ESSOS.LOCAL", "target": "SERVER@ESSOS.LOCAL", "relation": "Owns"}
+        ])
+
+        paths = mock_ce_client_graph.get_access_paths(
+            source="user",
+            connection="all",
+            target="all",
+            domain="ESSOS.LOCAL",
+        )
+
+        assert len(paths) == 1
+        assert paths[0]["source"] == "user"
+        assert paths[0]["target"] == "SERVER"
+        assert paths[0]["relation"] == "Owns"
+
+    def test_get_users_with_dc_access_primary_query(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query = Mock(return_value=[
+            {"user": "alice@essos.local", "dc": "dc01@essos.local", "relation": "AdminTo"}
+        ])
+
+        results = mock_ce_client_graph.get_users_with_dc_access("essos.local")
+
+        assert results == [
+            {"source": "alice", "target": "dc01", "path": "alice -> dc01 (AdminTo)"}
+        ]
+        assert mock_ce_client_graph.execute_query.call_count == 1
+
+    def test_get_users_with_dc_access_fallback_query(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query = Mock(side_effect=[
+            [],
+            [{"user": "alice@essos.local", "computer": "ws01@essos.local", "relation": "CanRDP"}],
+        ])
+
+        results = mock_ce_client_graph.get_users_with_dc_access("essos.local")
+
+        assert results == [
+            {"source": "alice", "target": "ws01", "path": "alice -> ws01 (CanRDP)"}
+        ]
+        assert mock_ce_client_graph.execute_query.call_count == 2
+
+    def test_get_critical_aces_by_domain_formats_results(self, mock_ce_client_graph):
+        mock_ce_client_graph.execute_query = Mock(return_value=[
+            {"name": "alice@essos.local", "relation": "GenericAll"}
+        ])
+
+        aces = mock_ce_client_graph.get_critical_aces_by_domain("essos.local", blacklist=[], high_value=False)
+
+        assert aces == [{"source": "alice", "relation": "GenericAll", "target": "alice"}]
+
+    def test_headers_include_authorization(self):
+        with patch.object(BloodHoundCEClient, "_load_config", return_value=None):
+            client = BloodHoundCEClient(base_url="http://localhost:8080", api_token="abc123")
+        headers = client._get_headers()
+        assert headers["Authorization"] == "Bearer abc123"
+        assert "User-Agent" in headers

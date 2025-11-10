@@ -1,9 +1,9 @@
 """
-Unit tests for Legacy BloodHound queries using mocks
+Unit tests for BloodHound legacy queries
 """
 import pytest
 from unittest.mock import Mock, patch
-from bloodhound_cli.main import BloodHoundACEAnalyzer
+from bloodhound_cli.old_main import BloodHoundACEAnalyzer
 
 
 class TestLegacyQueries:
@@ -12,7 +12,7 @@ class TestLegacyQueries:
     @pytest.fixture
     def mock_analyzer(self):
         """Create analyzer with mocked Neo4j driver"""
-        with patch('bloodhound_cli.main.GraphDatabase.driver') as mock_driver:
+        with patch('bloodhound_cli.old_main.GraphDatabase.driver') as mock_driver:
             mock_session = Mock()
             mock_session.run.return_value.data.return_value = []
             mock_driver.return_value.session.return_value.__enter__.return_value = mock_session

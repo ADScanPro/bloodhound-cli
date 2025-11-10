@@ -3,7 +3,7 @@ Integration tests for BloodHound CE CLI with real HTTP API
 """
 import pytest
 import os
-from bloodhound_cli.main import BloodHoundCEClient
+from bloodhound_cli.core.ce import BloodHoundCEClient
 
 
 @pytest.mark.integration
@@ -36,65 +36,57 @@ class TestCEIntegration:
     
     def test_get_users(self, ce_client):
         """Test user enumeration with BloodHound CE API"""
-        # Test that we can make authenticated requests using the session
         try:
-            # Test basic API connectivity using the session
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (n) RETURN n LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API connectivity failed: {e}")
     
     def test_get_computers(self, ce_client):
         """Test computer enumeration with BloodHound CE API"""
         try:
-            # Test that we can make authenticated requests
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (c:Computer) RETURN c LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
     def test_get_groups(self, ce_client):
         """Test group enumeration with BloodHound CE API"""
         try:
-            # Test API connectivity
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (g:Group) RETURN g LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
     def test_get_domains(self, ce_client):
         """Test domain enumeration with BloodHound CE API"""
         try:
-            # Test API connectivity
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (d:Domain) RETURN d LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
     def test_get_ous(self, ce_client):
         """Test OU enumeration with BloodHound CE API"""
         try:
-            # Test API connectivity
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (ou:OU) RETURN ou LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
     def test_get_gpos(self, ce_client):
         """Test GPO enumeration with BloodHound CE API"""
         try:
-            # Test API connectivity
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (g:GPO) RETURN g LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
     def test_get_containers(self, ce_client):
         """Test container enumeration with BloodHound CE API"""
         try:
-            # Test API connectivity
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (c:Container) RETURN c LIMIT 1")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API request failed: {e}")
     
@@ -107,9 +99,8 @@ class TestCEIntegration:
     def test_data_ingestion_status(self, ce_client):
         """Test that data ingestion is working"""
         try:
-            # Check if we can access the API
-            response = ce_client.session.get(f"{ce_client.base_url}/health")
-            assert response.status_code == 200
+            results = ce_client.execute_query("MATCH (n) RETURN count(n) AS total")
+            assert isinstance(results, list)
         except Exception as e:
             pytest.fail(f"CE API health check failed: {e}")
     

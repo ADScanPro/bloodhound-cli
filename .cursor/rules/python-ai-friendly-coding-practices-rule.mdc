@@ -1,0 +1,9 @@
+---
+description: Apply when preparing Python code explanations or snippets so they remain clear for AI-assisted workflows.
+alwaysApply: false
+---
+- When sharing code in responses, include short context snippets plus an explanation of the intent before the snippet.
+- Use descriptive variable and function names that reflect domain concepts (e.g., `ace_result` instead of `data`).
+- Add type hints for function signatures and complex variables.
+- Comment non-trivial logic paths, focusing on the "why" rather than restating the code.
+- Raise or log errors with actionable context (input parameters, API endpoints, ids) to simplify triage.

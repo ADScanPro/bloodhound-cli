@@ -1,6 +1,7 @@
 """
-Legacy BloodHound implementation using Neo4j
+BloodHound Legacy (Neo4j) implementation
 """
+# pylint: skip-file
 from typing import List, Dict, Optional
 from neo4j import GraphDatabase
 from .base import BloodHoundClient

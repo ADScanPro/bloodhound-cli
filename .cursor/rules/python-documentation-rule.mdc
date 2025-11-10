@@ -1,0 +1,8 @@
+---
+description: Apply when documenting or updating Python modules so docstrings follow the Google style guide.
+alwaysApply: false
+---
+- Add module-level docstrings that summarise purpose and key public entry points.
+- Document every public class and function using Google-style docstrings with `Args`, `Returns`, and `Raises` sections where applicable.
+- Update inline documentation whenever behaviour or parameters change; do not leave stale examples.
+- Include usage examples in docstrings when APIs are non-trivial (reference snippets under `docs/` if available).
