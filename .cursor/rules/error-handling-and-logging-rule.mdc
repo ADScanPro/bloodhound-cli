@@ -1,6 +1,5 @@
 ---
-description: Apply when touching error handling or logging in the CLI to ensure consistent context-rich logs.
-alwaysApply: false
+alwaysApply: true
 ---
 - Wrap external I/O (network, filesystem, subprocess) in explicit try/except blocks; bubble up unexpected exceptions after logging.
 - Configure and reuse `structlog` for logging (see `src/bloodhound_cli/core/logging_utils.py` once added) and log at `error` level with contextual identifiers (command, entity ids, API endpoint).

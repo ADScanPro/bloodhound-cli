@@ -1,6 +1,5 @@
 ---
-description: Apply when formatting Python code so we stay aligned with Black, Pylint, and PEP 8 conventions.
-alwaysApply: false
+alwaysApply: true
 ---
 - Use Black for code formatting.
 - Use Pylint for linting.

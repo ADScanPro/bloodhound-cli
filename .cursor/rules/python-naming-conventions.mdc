@@ -1,6 +1,5 @@
 ---
-description: Apply when naming Python symbols or files to keep conventions consistent across the CLI.
-alwaysApply: false
+alwaysApply: true
 ---
 - Use snake_case for variables.
 - Use snake_case for functions.

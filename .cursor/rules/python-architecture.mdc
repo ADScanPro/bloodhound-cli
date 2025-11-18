@@ -1,6 +1,5 @@
 ---
-description: Apply when designing or restructuring Python modules to keep architecture modular, SRP-compliant, and DRY.
-alwaysApply: false
+alwaysApply: true
 ---
 - Modular design with distinct files for models, services, controllers, and utilities.
 - Follow Single Responsibility Principle.

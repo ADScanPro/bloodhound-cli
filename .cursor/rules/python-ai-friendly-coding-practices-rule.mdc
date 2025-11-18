@@ -1,6 +1,5 @@
 ---
-description: Apply when preparing Python code explanations or snippets so they remain clear for AI-assisted workflows.
-alwaysApply: false
+alwaysApply: true
 ---
 - When sharing code in responses, include short context snippets plus an explanation of the intent before the snippet.
 - Use descriptive variable and function names that reflect domain concepts (e.g., `ace_result` instead of `data`).

@@ -1,6 +1,5 @@
 ---
-description: Apply when writing or updating tests so pytest conventions stay consistent.
-alwaysApply: false
+alwaysApply: true
 ---
 - Place new tests under `tests/` mirroring the source package structure (e.g., `tests/core/test_ce_client.py`).
 - Use pytest fixtures for setup/teardown; avoid using `unittest.TestCase` or global state.

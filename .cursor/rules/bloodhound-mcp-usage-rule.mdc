@@ -1,11 +1,5 @@
-alwaysApply: false
-description: "Consult the BloodHound MCP documentation whenever you need BloodHound-specific details."
-examples:
-  applies:
-    - "Before implementing or debugging Cypher queries for BloodHound CE or Legacy."
-    - "When verifying API endpoints, relationship semantics, or query limitations."
-  doesNotApply:
-    - "Generic Python refactors unrelated to BloodHound features."
+---
+alwaysApply: true
 ---
 # BloodHound MCP Usage
 

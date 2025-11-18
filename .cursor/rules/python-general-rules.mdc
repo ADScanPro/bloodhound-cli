@@ -1,6 +1,5 @@
 ---
-description: Apply when implementing or refactoring Python code to keep typing, docs, tests, and style consistent.
-alwaysApply: false
+alwaysApply: true
 ---
 - Add type annotations, including return types, to each new or modified function or method.
 - Write docstrings that follow PEP 257 for public modules, classes, and functions; update them whenever behaviour changes.

@@ -1,6 +1,5 @@
 ---
-description: Applies when editing or refactoring Python CLI modules under `src/bloodhound_cli` and related tooling.
-alwaysApply: false
+alwaysApply: true
 ---
 - Before changing code, inspect existing modules in `src/bloodhound_cli` to understand current patterns and reuse shared helpers where possible.
 - Default to writing composable functions and classes with clear responsibilities; avoid monolithic scripts.

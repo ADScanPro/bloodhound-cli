@@ -1,6 +1,5 @@
 ---
-description: Apply after completing Python code changes to ensure lint checks pass.
-alwaysApply: false
+alwaysApply: true
 ---
 - After completing Python changes, run `uv run ruff check` and `uv run pylint src/bloodhound_cli` before marking the task complete.
 - Record any intentional lint suppressions inline with a comment explaining why they are safe.

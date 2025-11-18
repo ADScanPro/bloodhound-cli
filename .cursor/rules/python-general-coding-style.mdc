@@ -1,6 +1,5 @@
 ---
-description: Apply to Python source files under `src/` when enforcing indentation, line length, and commenting style.
-alwaysApply: false
+alwaysApply: true
 ---
 - Prefer standalone functions for stateless helpers; introduce classes only when encapsulating state or behaviour.
 - Enforce code style consistency using `uv run ruff check --fix`.

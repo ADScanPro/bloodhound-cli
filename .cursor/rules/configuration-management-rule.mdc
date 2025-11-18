@@ -1,6 +1,5 @@
 ---
-description: Apply when adding or modifying configuration for the CLI (environment variables, .env files, python-dotenv usage).
-alwaysApply: false
+alwaysApply: true
 ---
 - Store secrets and environment-specific values in `.env` files kept out of version control (see `.env.example` for keys to maintain).
 - Model configuration with `pydantic-settings` so CLI options, environment variables, and `.env` files are validated automatically.

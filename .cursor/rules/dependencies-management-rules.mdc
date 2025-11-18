@@ -1,6 +1,5 @@
 ---
-description: Apply when adding or upgrading Python dependencies so environments stay consistent via uv.
-alwaysApply: false
+alwaysApply: true
 ---
 - Use `uv` for every dependency operation: `uv pip install <pkg>`, `uv pip compile`, and `uv sync` (no plain `pip`).
 - Keep lockfiles updated by running `uv pip compile pyproject.toml --output-file requirements.lock` when dependencies change.
