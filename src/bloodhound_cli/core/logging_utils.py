@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from functools import lru_cache
 from typing import Any, Dict
 
 import structlog
-
-_logger_initialized = False
 
 
 def configure_logging(debug: bool = False, json_output: bool = False) -> None:
@@ -18,10 +17,12 @@ def configure_logging(debug: bool = False, json_output: bool = False) -> None:
         debug: Whether to emit debug-level events.
         json_output: Emit logs as JSON instead of human-readable console output.
     """
-    global _logger_initialized  # pylint: disable=global-statement
-    if _logger_initialized:
-        return
+    _configure_logging_once(debug, json_output)
 
+
+@lru_cache(maxsize=1)
+def _configure_logging_once(debug: bool, json_output: bool) -> None:
+    """Configure structlog exactly once, caching by arguments."""
     level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(level=level, stream=sys.stderr, format="%(message)s")
 
@@ -43,7 +44,6 @@ def configure_logging(debug: bool = False, json_output: bool = False) -> None:
         wrapper_class=structlog.make_filtering_bound_logger(level),
         cache_logger_on_first_use=True,
     )
-    _logger_initialized = True
 
 
 def get_logger(name: str | None = None, **initial_context: Any) -> structlog.BoundLogger:
