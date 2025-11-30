@@ -3,7 +3,6 @@ Integration tests for Legacy BloodHound CLI with real Neo4j database
 """
 import pytest
 import os
-from neo4j import GraphDatabase
 from bloodhound_cli.old_main import BloodHoundACEAnalyzer
 
 

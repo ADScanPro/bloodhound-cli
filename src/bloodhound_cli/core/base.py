@@ -45,6 +45,13 @@ class BloodHoundClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_user_groups(
+        self, domain: str, username: str, recursive: bool = True
+    ) -> List[str]:
+        """Get groups for a specific user"""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_sessions(self, domain: str, da: bool = False) -> List[Dict]:
         """Get user sessions"""
         raise NotImplementedError

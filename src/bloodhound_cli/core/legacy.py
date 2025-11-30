@@ -127,6 +127,43 @@ class BloodHoundLegacyClient(BloodHoundClient):
         """
         results = self.execute_query(query, domain=domain)
         return [record["samaccountname"] for record in results]
+
+    def get_user_groups(
+        self, domain: str, username: str, recursive: bool = True
+    ) -> List[str]:
+        path_clause = "-[:MemberOf*1..]->" if recursive else "-[:MemberOf]->"
+        query = f"""
+        MATCH (u:User)
+        WHERE u.enabled = true
+          AND toLower(u.domain) = toLower($domain)
+          AND (
+            toLower(u.samaccountname) = toLower($username)
+            OR toLower(u.name) = toLower($username)
+          )
+        MATCH (u){path_clause}(g:Group)
+        RETURN DISTINCT COALESCE(g.name, g.samaccountname) AS group_name,
+                        g.samaccountname AS samaccountname,
+                        g.domain AS group_domain
+        ORDER BY toLower(group_name)
+        """
+        params = {"domain": domain, "username": username}
+        results = self.execute_query(query, **params)
+
+        groups: List[str] = []
+        for record in results:
+            display_name = record.get("group_name")
+            if not display_name:
+                samaccountname = record.get("samaccountname")
+                group_domain = record.get("group_domain")
+                if group_domain and samaccountname:
+                    display_name = f"{group_domain}\\{samaccountname}"
+                else:
+                    display_name = samaccountname or group_domain
+
+            if display_name:
+                groups.append(display_name)
+
+        return groups
     
     def get_sessions(self, domain: str, da: bool = False) -> List[Dict]:
         """

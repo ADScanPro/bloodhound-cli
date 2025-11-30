@@ -353,6 +353,49 @@ class BloodHoundCEClient(BloodHoundClient):
 
         except Exception:
             return []
+
+    def get_user_groups(
+        self, domain: str, username: str, recursive: bool = True
+    ) -> List[str]:
+        """Get group memberships for a user (optionally recursive)"""
+        try:
+            membership_pattern = "-[:MemberOf*1..]->" if recursive else "-[:MemberOf]->"
+            sanitized_user = username.replace("'", "\\'")
+
+            cypher_query = f"""
+            MATCH (u:User)
+            WHERE u.enabled = true
+              AND toLower(u.domain) = toLower('{domain}')
+              AND (
+                toLower(u.samaccountname) = toLower('{sanitized_user}')
+                OR toLower(u.name) = toLower('{sanitized_user}')
+              )
+            MATCH (u){membership_pattern}(g:Group)
+            RETURN DISTINCT g
+            ORDER BY toLower(g.name)
+            """
+            
+            result = self.execute_query(cypher_query)
+            groups: List[str] = []
+            
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    display_name = node_properties.get("name")
+                    if not display_name:
+                        group_domain = node_properties.get("domain")
+                        samaccountname = node_properties.get("samaccountname")
+                        if group_domain and samaccountname:
+                            display_name = f"{group_domain}\\{samaccountname}"
+                        else:
+                            display_name = samaccountname or group_domain
+                    
+                    if display_name:
+                        groups.append(display_name)
+            
+            return groups
+
+        except Exception:
+            return []
     
     def get_sessions(self, domain: str, da: bool = False) -> List[Dict]:
         """Get user sessions using CySQL query"""
