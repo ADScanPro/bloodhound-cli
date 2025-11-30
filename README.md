@@ -77,6 +77,15 @@ bloodhound-cli --edition legacy user -d mydomain.local
 bloodhound-cli --edition ce user -d mydomain.local
 ```
 
+#### List Group Memberships For A User
+```bash
+# Resolve recursive memberships (default)
+bloodhound-cli --edition ce group -d mydomain.local -u alice
+
+# Only direct memberships
+bloodhound-cli group -d mydomain.local -u alice --direct-only
+```
+
 #### List Computers
 ```bash
 # All computers

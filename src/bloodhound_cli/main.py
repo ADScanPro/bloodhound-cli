@@ -176,6 +176,75 @@ def cmd_users(args):
         client.close()
 
 
+def cmd_group(args):
+    """List group membership for a user"""
+    logger = LOGGER.bind(
+        command="group", edition=args.edition, domain=args.domain, user=args.group_user
+    )
+    client = get_client(
+        args.edition,
+        uri=args.uri,
+        user=args.user,
+        password=args.password,
+        base_url=args.base_url,
+        username=args.username,
+        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        debug=args.debug,
+        verbose=args.verbose,
+    )
+
+    recursive = not args.direct_only
+
+    try:
+        if args.debug:
+            logger.debug("fetching user groups", recursive=recursive)
+
+        groups = client.get_user_groups(
+            domain=args.domain, username=args.group_user, recursive=recursive
+        )
+
+        if not groups:
+            print(
+                f"No groups found for user {args.group_user} in domain {args.domain}"
+            )
+            return
+
+        if args.verbose:
+            scope = "recursive" if recursive else "direct"
+            print(
+                f"User {args.group_user} belongs to {len(groups)} "
+                f"{scope} group(s) in domain {args.domain}"
+            )
+
+        output_results(groups, args.output, False, "groups")
+
+    finally:
+        client.close()
+
+
+def register_group_subcommand(subparsers):
+    """Register the 'group' command parser."""
+    group_parser = subparsers.add_parser(
+        "group", help="List group memberships for a user", aliases=["groups"]
+    )
+    group_parser.add_argument(
+        "-d", "--domain", required=True, help="Domain that contains the user"
+    )
+    group_parser.add_argument(
+        "-u",
+        "--user",
+        dest="group_user",
+        required=True,
+        help="User to enumerate group memberships for",
+    )
+    group_parser.add_argument(
+        "--direct-only",
+        action="store_true",
+        help="Show only direct group memberships (skip recursive expansion)",
+    )
+    group_parser.set_defaults(func=cmd_group)
+
+
 def cmd_computers(args):
     """List computers in a domain"""
     logger = LOGGER.bind(command="computer", edition=args.edition, domain=args.domain)
@@ -631,6 +700,7 @@ def main():
         help="Show password last change information",
     )
     users_parser.set_defaults(func=cmd_users)
+    register_group_subcommand(subparsers)
 
     # Computers command
     computers_parser = subparsers.add_parser("computer", help="List computers")
