@@ -1,9 +1,11 @@
 """
 Unit tests for BloodHound CE queries using mocks
 """
+from types import SimpleNamespace
 import pytest
 from unittest.mock import Mock, patch
 from bloodhound_cli.core.ce import BloodHoundCEClient
+from bloodhound_cli import main as cli_main
 
 
 class TestCEQueries:
@@ -673,6 +675,66 @@ class TestCLICommands:
         assert "krbtgt" not in admin_users, "Disabled user krbtgt should not be in admin users"
         assert "vagrant" not in users, "Disabled user vagrant should not be in regular users"
         assert "vagrant" not in admin_users, "Disabled user vagrant should not be in admin users"
+
+    def test_group_command_outputs_recursive_memberships(self, monkeypatch, capsys):
+        """Simulate `bloodhound-cli group -u daenerys.targaryen -d essos.local` output."""
+        expected_groups = [
+            "DRAGONSFRIENDS@ESSOS.LOCAL",
+            "TARGARYEN@ESSOS.LOCAL",
+            "ACROSSTHENARROWSEA@SEVENKINGDOMS.LOCAL",
+            "EVERYONE@ESSOS.LOCAL",
+            "AUTHENTICATED USERS@ESSOS.LOCAL",
+            "DENIED RODC PASSWORD REPLICATION GROUP@ESSOS.LOCAL",
+            "PRE-WINDOWS 2000 COMPATIBLE ACCESS@ESSOS.LOCAL",
+            "DOMAIN ADMINS@ESSOS.LOCAL",
+            "DOMAIN USERS@ESSOS.LOCAL",
+            "REMOTE DESKTOP USERS@ESSOS.LOCAL",
+            "USERS@ESSOS.LOCAL",
+            "ADMINISTRATORS@ESSOS.LOCAL",
+        ]
+
+        class DummyClient:
+            def __init__(self):
+                self.closed = False
+                self.calls = []
+
+            def get_user_groups(self, domain, username, recursive=True):
+                self.calls.append((domain, username, recursive))
+                assert recursive is True
+                return expected_groups
+
+            def close(self):
+                self.closed = True
+
+        dummy_client = DummyClient()
+        monkeypatch.setattr(
+            cli_main,
+            "get_client",
+            lambda *_, **__: dummy_client,
+        )
+
+        args = SimpleNamespace(
+            edition="ce",
+            uri=None,
+            user=None,
+            password=None,
+            base_url="http://localhost:8080",
+            username="admin",
+            ce_password="Bloodhound123!",
+            debug=False,
+            verbose=False,
+            domain="essos.local",
+            group_user="daenerys.targaryen",
+            direct_only=False,
+            output=None,
+        )
+
+        cli_main.cmd_group(args)
+
+        captured = capsys.readouterr()
+        assert captured.out.strip().splitlines() == expected_groups
+        assert dummy_client.calls == [("essos.local", "daenerys.targaryen", True)]
+        assert dummy_client.closed is True
 
     @pytest.fixture
     def mock_ce_client_graph(self):
