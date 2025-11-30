@@ -77,6 +77,13 @@ bloodhound-cli --edition legacy user -d mydomain.local
 bloodhound-cli --edition ce user -d mydomain.local
 ```
 
+#### Show Version
+```bash
+bloodhound-cli version
+# or
+bloodhound-cli --version
+```
+
 #### List Group Memberships For A User
 ```bash
 # Resolve recursive memberships (default)

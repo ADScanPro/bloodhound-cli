@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 import structlog
 
-_LOGGER_INITIALISED = False
+_logger_initialized = False
 
 
 def configure_logging(debug: bool = False, json_output: bool = False) -> None:
@@ -18,8 +18,8 @@ def configure_logging(debug: bool = False, json_output: bool = False) -> None:
         debug: Whether to emit debug-level events.
         json_output: Emit logs as JSON instead of human-readable console output.
     """
-    global _LOGGER_INITIALISED  # pylint: disable=global-statement
-    if _LOGGER_INITIALISED:
+    global _logger_initialized  # pylint: disable=global-statement
+    if _logger_initialized:
         return
 
     level = logging.DEBUG if debug else logging.INFO
@@ -43,7 +43,7 @@ def configure_logging(debug: bool = False, json_output: bool = False) -> None:
         wrapper_class=structlog.make_filtering_bound_logger(level),
         cache_logger_on_first_use=True,
     )
-    _LOGGER_INITIALISED = True
+    _logger_initialized = True
 
 
 def get_logger(name: str | None = None, **initial_context: Any) -> structlog.BoundLogger:

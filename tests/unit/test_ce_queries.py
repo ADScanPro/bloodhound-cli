@@ -736,6 +736,12 @@ class TestCLICommands:
         assert dummy_client.calls == [("essos.local", "daenerys.targaryen", True)]
         assert dummy_client.closed is True
 
+    def test_version_command_prints_version(self, capsys):
+        """Ensure `bloodhound-cli version` prints the version string."""
+        cli_main.cmd_version(SimpleNamespace())
+        captured = capsys.readouterr()
+        assert captured.out.strip() == f"bloodhound-cli {cli_main.get_cli_version()}"
+
     @pytest.fixture
     def mock_ce_client_graph(self):
         client = BloodHoundCEClient(

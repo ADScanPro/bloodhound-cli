@@ -16,12 +16,21 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     __package__ = "bloodhound_cli"
 
+from . import __version__ as PACKAGE_VERSION
 from .core.factory import create_bloodhound_client
 from .core.logging_utils import configure_logging, get_logger
 from .core.settings import load_ce_config, load_legacy_config, CONFIG_FILE, CEConfig
 
 CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 LOGGER = get_logger("cli")
+
+
+def get_cli_version() -> str:
+    """Return the CLI version string."""
+    return PACKAGE_VERSION or "unknown"
+
+
+CLI_VERSION = get_cli_version()
 
 
 def load_config():
@@ -222,6 +231,11 @@ def cmd_group(args):
         client.close()
 
 
+def cmd_version(args):  # pylint: disable=unused-argument
+    """Display the CLI version."""
+    print(f"bloodhound-cli {CLI_VERSION}")
+
+
 def register_group_subcommand(subparsers):
     """Register the 'group' command parser."""
     group_parser = subparsers.add_parser(
@@ -243,6 +257,12 @@ def register_group_subcommand(subparsers):
         help="Show only direct group memberships (skip recursive expansion)",
     )
     group_parser.set_defaults(func=cmd_group)
+
+
+def register_version_subcommand(subparsers):
+    """Register the 'version' command parser."""
+    version_parser = subparsers.add_parser("version", help="Show CLI version")
+    version_parser.set_defaults(func=cmd_version)
 
 
 def cmd_computers(args):
@@ -653,6 +673,12 @@ def main():
         "--verbose", "-v", action="store_true", help="Enable verbose output"
     )
     parser.add_argument("-o", "--output", help="Output file to save results")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {CLI_VERSION}",
+        help="Show CLI version and exit",
+    )
 
     # Legacy connection options
     parser.add_argument(
@@ -812,6 +838,9 @@ def main():
         "--insecure", action="store_true", help="Disable TLS certificate verification"
     )
     auth_parser.set_defaults(func=cmd_auth)
+
+    # Version command
+    register_version_subcommand(subparsers)
 
     args = parser.parse_args()
 
