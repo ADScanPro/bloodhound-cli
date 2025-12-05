@@ -198,7 +198,45 @@ class BloodHoundCEClient(BloodHoundClient):
                         users.append(samaccountname)
             
             return users
+        except Exception:
+            return []
 
+    def get_users_in_ou(self, domain: str, ou_distinguished_name: str) -> List[str]:
+        """Get enabled users that belong to a specific OU using its distinguished name.
+
+        Args:
+            domain: AD domain name to filter users by (e.g. "north.sevenkingdoms.local").
+            ou_distinguished_name: Distinguished Name (DN) of the OU to search under.
+
+        Returns:
+            List of `samaccountname` values for users that belong to the OU.
+        """
+        try:
+            # Escape single quotes to avoid breaking the Cypher string
+            sanitized_ou_dn = ou_distinguished_name.replace("'", "\\'")
+
+            cypher_query = f"""
+            MATCH (ou:OU)
+            WHERE toLower(ou.distinguishedname) = toLower('{sanitized_ou_dn}')
+            MATCH (u:User)
+            WHERE u.enabled = true
+              AND toUpper(u.domain) = '{domain.upper()}'
+              AND toLower(u.distinguishedname) CONTAINS toLower(ou.distinguishedname)
+            RETURN u
+            """
+
+            result = self.execute_query(cypher_query)
+            users: List[str] = []
+
+            if result and isinstance(result, list):
+                for node_properties in result:
+                    samaccountname = node_properties.get("samaccountname") or node_properties.get("name", "")
+                    if samaccountname:
+                        if "@" in samaccountname:
+                            samaccountname = samaccountname.split("@")[0]
+                        users.append(samaccountname)
+
+            return users
         except Exception:
             return []
     

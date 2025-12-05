@@ -156,7 +156,15 @@ def cmd_users(args):
             output_results(results, args.output, args.verbose, "password info")
             return
 
-        if args.high_value:
+        if getattr(args, "ou_dn", None):
+            if args.edition.lower() != "ce":
+                print(
+                    "Filtering users by OU is only available for BloodHound CE (--edition ce)."
+                )
+                return
+            users = client.get_users_in_ou(args.domain, args.ou_dn)
+            user_type = f"users in OU {args.ou_dn}"
+        elif args.high_value:
             users = client.get_highvalue_users(args.domain)
             user_type = "high value users"
         elif args.admin_count:
@@ -703,6 +711,11 @@ def main():
     users_parser.add_argument("-d", "--domain", required=True, help="Domain to query")
     users_parser.add_argument(
         "-u", "--user", help="Specific user to query (for password-last-change)"
+    )
+    users_parser.add_argument(
+        "--ou-dn",
+        dest="ou_dn",
+        help="Distinguished Name of an OU to list its users (CE only)",
     )
     users_parser.add_argument(
         "--high-value", action="store_true", help="Show only high value users"

@@ -309,6 +309,36 @@ class TestCEQueries:
         users = mock_ce_client.get_users("error.domain.local")
         
         assert len(users) == 0
+
+    def test_get_users_in_ou_exception_handling(self, mock_ce_client):
+        """Test exception handling in get_users_in_ou"""
+        mock_ce_client.execute_query.side_effect = Exception("Query error")
+
+        users = mock_ce_client.get_users_in_ou(
+            "error.domain.local",
+            "OU=Winterfell,DC=north,DC=sevenkingdoms,DC=local",
+        )
+
+        assert len(users) == 0
+
+    def test_get_users_in_ou_uses_ou_dn_and_domain(self, mock_ce_client):
+        """Test OU-based user enumeration builds the correct Cypher query and parses results."""
+        ou_dn = "OU=Winterfell,DC=north,DC=sevenkingdoms,DC=local"
+        domain = "north.sevenkingdoms.local"
+
+        users = mock_ce_client.get_users_in_ou(domain, ou_dn)
+
+        # Same mocked execute_query data as for get_users
+        assert len(users) == 13
+        assert "jeor.mormont" in users
+
+        mock_ce_client.execute_query.assert_called_once()
+        query = mock_ce_client.execute_query.call_args[0][0]
+        assert "MATCH (ou:OU)" in query
+        assert "MATCH (u:User)" in query
+        assert "ou.distinguishedname" in query
+        assert domain.upper() in query
+        assert ou_dn in query
     
     def test_get_computers_basic(self, mock_ce_client_computers):
         """Test basic computer enumeration with CySQL query"""
@@ -734,6 +764,69 @@ class TestCLICommands:
         captured = capsys.readouterr()
         assert captured.out.strip().splitlines() == expected_groups
         assert dummy_client.calls == [("essos.local", "daenerys.targaryen", True)]
+        assert dummy_client.closed is True
+
+    def test_user_command_ou_filter_outputs_expected_users(self, monkeypatch, capsys):
+        """Simulate `bloodhound-cli user --ou-dn ... -d sevenkingdoms.local` output."""
+        expected_users = [
+            "maester.pycelle",
+            "lord.varys",
+            "petyer.baelish",
+            "stannis.baratheon",
+            "joffrey.baratheon",
+            "renly.baratheon",
+            "robert.baratheon",
+            "cersei.lannister",
+            "jaime.lannister",
+            "tywin.lannister",
+        ]
+
+        class DummyClient:
+            def __init__(self):
+                self.closed = False
+                self.calls = []
+
+            def get_users_in_ou(self, domain, ou_distinguished_name):
+                self.calls.append((domain, ou_distinguished_name))
+                return expected_users
+
+            def close(self):
+                self.closed = True
+
+        dummy_client = DummyClient()
+        monkeypatch.setattr(
+            cli_main,
+            "get_client",
+            lambda *_, **__: dummy_client,
+        )
+
+        args = SimpleNamespace(
+            edition="ce",
+            uri=None,
+            user=None,
+            password=None,
+            base_url="http://localhost:8080",
+            username="admin",
+            ce_password="Bloodhound123!",
+            debug=False,
+            verbose=False,
+            domain="sevenkingdoms.local",
+            ou_dn="OU=crownlands,DC=sevenkingdoms,DC=local",
+            high_value=False,
+            admin_count=False,
+            password_never_expires=False,
+            password_not_required=False,
+            password_last_change=False,
+            output=None,
+        )
+
+        cli_main.cmd_users(args)
+
+        captured = capsys.readouterr()
+        assert captured.out.strip().splitlines() == expected_users
+        assert dummy_client.calls == [
+            ("sevenkingdoms.local", "OU=crownlands,DC=sevenkingdoms,DC=local")
+        ]
         assert dummy_client.closed is True
 
     def test_version_command_prints_version(self, capsys):
