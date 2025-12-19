@@ -54,7 +54,7 @@ class TestCERealData:
         assert aces == []
 
     def test_get_critical_aces_stannis_high_value(self, ce_client):
-        """Stannis high-value ACEs should include KINGSLANDING$."""
+        """Stannis high-value ACEs should include only KINGSLANDING$ (BRAAVOS$ is not high-value)."""
         aces = ce_client.get_critical_aces(
             source_domain="sevenkingdoms.local",
             high_value=True,
@@ -63,7 +63,9 @@ class TestCERealData:
             relation="all",
         )
         targets = {(ace["target"], ace["relation"]) for ace in aces}
-        assert ("BRAAVOS$", "ReadLAPSPassword") in targets
+        # BRAAVOS$ does not have system_tags = "admin_tier_0", so it should NOT appear with high-value filter
+        assert ("BRAAVOS$", "ReadLAPSPassword") not in targets
+        # Only KINGSLANDING$ has system_tags = "admin_tier_0" and should appear
         assert ("KINGSLANDING$", "GenericAll") in targets
 
     def test_get_critical_aces_group_small_council(self, ce_client):
@@ -81,7 +83,11 @@ class TestCERealData:
         assert ("Small Council", "DragonStone", "AddMember") in triples
 
     def test_get_critical_aces_group_small_council_high_value(self, ce_client):
-        """High-value filter should retain tier-0 ACEs from Small Council."""
+        """High-value filter should retain tier-0 ACEs from Small Council.
+        
+        Note: BRAAVOS$ does not have system_tags = "admin_tier_0", so it should NOT
+        appear when filtering for high-value targets.
+        """
         aces = ce_client.get_critical_aces(
             source_domain="sevenkingdoms.local",
             high_value=True,
@@ -90,7 +96,8 @@ class TestCERealData:
             relation="all",
         )
         triples = {(ace["source"], ace["target"], ace["relation"]) for ace in aces}
-        assert triples == {("Spys", "BRAAVOS$", "ReadLAPSPassword")}
+        # BRAAVOS$ is not high-value (no system_tags = "admin_tier_0"), so no results expected
+        assert triples == set(), f"Expected empty set for high-value filter, but got: {triples}"
 
     def test_get_users_north_sevenkingdoms(self, ce_client):
         """Test get_users with north.sevenkingdoms.local domain"""
