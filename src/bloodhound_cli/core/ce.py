@@ -34,6 +34,9 @@ class BloodHoundCEClient(BloodHoundClient):
         if self.api_token:
             self.session.headers.update({"Authorization": f"Bearer {self.api_token}"})
         self.logger = get_logger("BloodHoundCE", base_url=self.base_url)
+        # Store credentials for token renewal
+        self._stored_username = None
+        self._stored_password = None
     
     def _debug(self, message: str, **context) -> None:
         if self.debug:
@@ -74,6 +77,9 @@ class BloodHoundCEClient(BloodHoundClient):
                 if token:
                     self.api_token = token
                     self.session.headers.update({"Authorization": f"Bearer {token}"})
+                    # Store credentials for token renewal
+                    self._stored_username = username
+                    self._stored_password = password
                     return token
             return None
         except Exception:
@@ -102,6 +108,24 @@ class BloodHoundCEClient(BloodHoundClient):
             )
             
             response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+            
+            # Handle authentication errors by attempting token renewal
+            if response.status_code == 401:
+                self._debug("authentication failed, attempting token renewal")
+                if self.ensure_valid_token():
+                    # Retry the request with renewed token
+                    response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+                    self._debug(
+                        "cypher query retry response",
+                        status=response.status_code,
+                    )
+                else:
+                    self._debug(
+                        "token renewal failed",
+                        status=response.status_code,
+                        response_text=response.text,
+                    )
+                    return []
             
             if response.status_code == 200:
                 data = response.json()
@@ -155,6 +179,20 @@ class BloodHoundCEClient(BloodHoundClient):
                 status=response.status_code,
                 headers=dict(response.headers),
             )
+            
+            # Handle authentication errors by attempting token renewal
+            if response.status_code == 401:
+                self._debug("authentication failed, attempting token renewal")
+                if self.ensure_valid_token():
+                    # Retry the request with renewed token
+                    response = self.session.post(url, json=payload, verify=self.verify, timeout=60)
+                    self._debug(
+                        "relationship query retry response",
+                        status=response.status_code,
+                    )
+                else:
+                    self._debug("token renewal failed", status=response.status_code, response=response.text)
+                    return {}
             
             if response.status_code == 200:
                 data = response.json()
@@ -1171,7 +1209,25 @@ class BloodHoundCEClient(BloodHoundClient):
     def auto_renew_token(self) -> bool:
         """Automatically renew the token using stored credentials"""
         try:
-            # Load config to get stored credentials
+            # First try to use credentials stored in memory (from authenticate())
+            if self._stored_username and self._stored_password:
+                login_url = f"{self.base_url}/api/v2/login"
+                payload = {"login_method": "secret", "username": self._stored_username, "secret": self._stored_password}
+                
+                # Remove stale token headers before logging in
+                self.session.headers.pop("Authorization", None)
+                response = self.session.post(login_url, json=payload, verify=self.verify, timeout=60)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    token = data.get("data", {}).get("session_token")
+                    if token:
+                        self.api_token = token
+                        self.session.headers.update({"Authorization": f"Bearer {token}"})
+                        return True
+                return False
+            
+            # Fallback: Load config to get stored credentials
             config = configparser.ConfigParser()
             config.read(str(CONFIG_FILE))
             
