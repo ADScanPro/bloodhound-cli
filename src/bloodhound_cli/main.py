@@ -114,7 +114,7 @@ def cmd_users(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -203,7 +203,7 @@ def cmd_group(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -281,7 +281,7 @@ def cmd_computers(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -316,7 +316,7 @@ def cmd_sessions(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -364,7 +364,7 @@ def cmd_acl(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -455,7 +455,7 @@ def cmd_upload(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -546,7 +546,7 @@ def cmd_access(args):
         password=args.password,
         base_url=args.base_url,
         username=args.username,
-        ce_password=getattr(args, "ce_password", "Bloodhound123!"),
+        ce_password=getattr(args, "ce_password", "Adscan4thewin!"),
         debug=args.debug,
         verbose=args.verbose,
     )
@@ -699,7 +699,7 @@ def main():
     )
     parser.add_argument("--username", default="admin", help="BloodHound CE username")
     parser.add_argument(
-        "--ce-password", default="Bloodhound123!", help="BloodHound CE password"
+        "--ce-password", default="Adscan4thewin!", help="BloodHound CE password"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
