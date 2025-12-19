@@ -20,8 +20,6 @@ from . import __version__ as PACKAGE_VERSION
 from .core.factory import create_bloodhound_client
 from .core.logging_utils import configure_logging, get_logger
 from .core.settings import load_ce_config, load_legacy_config, CONFIG_FILE, CEConfig
-
-CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
 LOGGER = get_logger("cli")
 
 
@@ -34,8 +32,8 @@ CLI_VERSION = get_cli_version()
 
 
 def load_config():
-    """Load configuration from ~/.bloodhound_config"""
-    config_path = os.path.expanduser("~/.bloodhound_config")
+    """Load configuration from the resolved config path."""
+    config_path = str(CONFIG_FILE)
     if os.path.exists(config_path):
         config = configparser.ConfigParser()
         config.read(config_path)

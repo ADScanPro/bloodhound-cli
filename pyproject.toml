@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bloodhound-cli"  # The package name as installed via pip (pip install bloodhound-cli)
-version = "1.2.5"          # Bump: add CE skeleton, --edition, --verbose, rich optional
+version = "1.2.6"          # Bump: add CE skeleton, --edition, --verbose, rich optional
 description = "CLI for querying BloodHound data (Legacy Neo4j + CE skeleton)."
 readme = "README.md"
 authors = [

@@ -3,13 +3,35 @@
 from __future__ import annotations
 
 import configparser
+import os
 from pathlib import Path
 from typing import Optional
 
 from pydantic import AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-CONFIG_FILE = Path.home() / ".bloodhound_config"
+try:
+    import pwd  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover
+    pwd = None
+
+def _get_effective_user_home() -> Path:
+    """Return the home directory that should own BloodHound CLI config/state.
+
+    If running under sudo, prefer the invoking user's home directory so we don't
+    split configuration between `/root` and the normal user's home.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        if pwd is not None:
+            try:
+                return Path(pwd.getpwnam(sudo_user).pw_dir)
+            except KeyError:
+                pass
+    return Path.home()
+
+
+CONFIG_FILE = _get_effective_user_home() / ".bloodhound_config"
 
 
 class CEConfig(BaseSettings):

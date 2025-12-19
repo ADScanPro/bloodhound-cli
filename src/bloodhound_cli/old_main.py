@@ -13,6 +13,8 @@ import getpass
 from pathlib import Path
 import time
 
+from .core.settings import CONFIG_FILE
+
 try:
     from rich.console import Console
     _RICH_AVAILABLE = True
@@ -21,7 +23,7 @@ except Exception:  # pragma: no cover - graceful fallback if rich is unavailable
     _RICH_AVAILABLE = False
     console = None
 
-CONFIG_PATH = os.path.expanduser("~/.bloodhound_config")
+CONFIG_PATH = str(CONFIG_FILE)
 
 class BloodHoundACEAnalyzer:
     def __init__(self, uri: str, user: str, password: str, debug: bool = False, verbose: bool = False):

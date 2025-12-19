@@ -2,14 +2,15 @@
 BloodHound CE implementation using HTTP API
 """
 # pylint: skip-file
-import requests
-import os
 import configparser
+import os
 from json import JSONDecodeError
 from typing import List, Dict, Optional
 from pathlib import Path
+import requests
 from .base import BloodHoundClient
 from .logging_utils import get_logger
+from .settings import CONFIG_FILE
 
 
 class BloodHoundCEClient(BloodHoundClient):
@@ -39,8 +40,8 @@ class BloodHoundCEClient(BloodHoundClient):
             self.logger.debug(message, **context)
     
     def _load_config(self) -> Optional[Dict[str, str]]:
-        """Load configuration from ~/.bloodhound_config file"""
-        config_path = os.path.expanduser("~/.bloodhound_config")
+        """Load configuration from the resolved config path."""
+        config_path = str(CONFIG_FILE)
         if not os.path.exists(config_path):
             return None
             
@@ -1172,7 +1173,7 @@ class BloodHoundCEClient(BloodHoundClient):
         try:
             # Load config to get stored credentials
             config = configparser.ConfigParser()
-            config.read(os.path.expanduser("~/.bloodhound_config"))
+            config.read(str(CONFIG_FILE))
             
             if 'CE' not in config:
                 return False
@@ -1211,7 +1212,7 @@ class BloodHoundCEClient(BloodHoundClient):
             
             # Update the stored token and our session
             config['CE']['api_token'] = token
-            with open(os.path.expanduser("~/.bloodhound_config"), 'w') as f:
+            with open(str(CONFIG_FILE), 'w', encoding="utf-8") as f:
                 config.write(f)
             
             # Update our session with the new token
