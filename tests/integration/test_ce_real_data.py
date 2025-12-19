@@ -16,7 +16,7 @@ class TestCERealData:
         """Create BloodHound CE client for integration tests"""
         ce_url = os.getenv("BLOODHOUND_CE_URL", "http://localhost:8080")
         ce_user = os.getenv("BLOODHOUND_CE_USER", "admin")
-        ce_password = os.getenv("BLOODHOUND_CE_PASSWORD", "Bloodhound123!")
+        ce_password = os.getenv("BLOODHOUND_CE_PASSWORD", "Adscan4thewin!")
         
         client = BloodHoundCEClient(
             base_url=ce_url,
